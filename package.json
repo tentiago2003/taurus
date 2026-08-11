@@ -17,5 +17,8 @@
   "bugs": {
     "url": "https://github.com/tentiago2003/taurus/issues"
   },
-  "homepage": "https://github.com/tentiago2003/taurus#readme"
+  "homepage": "https://github.com/tentiago2003/taurus#readme",
+  "dependencies": {
+    "mqtt": "^5.15.2"
+  }
 }
