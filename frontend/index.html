@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Taurus</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #f6f7f9;
+      color: #222;
+      display: flex;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 760px;
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 16px 40px rgba(16, 24, 40, 0.08);
+      overflow: hidden;
+    }
+
+    header {
+      padding: 20px 24px;
+      border-bottom: 1px solid #e6e8ec;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    header h1 {
+      margin: 0;
+      font-size: 1.25rem;
+      letter-spacing: 0.02em;
+    }
+
+    .status {
+      padding: 8px 14px;
+      border-radius: 999px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .status.connected {
+      background: #e6f5ea;
+      color: #13633f;
+      border: 1px solid #c2e8ce;
+    }
+
+    .status.disconnected {
+      background: #fce8e6;
+      color: #8a1a1d;
+      border: 1px solid #f3c5c1;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 420px;
+    }
+
+    th,
+    td {
+      text-align: left;
+      padding: 16px 20px;
+      border-bottom: 1px solid #eceff4;
+    }
+
+    th {
+      background: #fafbfc;
+      font-size: 0.95rem;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      color: #5d6675;
+    }
+
+    tbody tr:nth-child(even) {
+      background: #fbfcfd;
+    }
+
+    tbody tr:hover {
+      background: #f4f6f8;
+    }
+
+    td.value {
+      font-weight: 600;
+    }
+
+    .empty {
+      color: #6b7280;
+    }
+
+    @media (max-width: 600px) {
+      body {
+        padding: 12px;
+      }
+
+      header {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      th,
+      td {
+        padding: 12px 14px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div>
+        <h1>Taurus</h1>
+        <p style="margin: 4px 0 0; color:#5d6675; font-size:0.95rem;">Status da conexão WebSocket e valores dos slaves.</p>
+      </div>
+      <div id="connectionStatus" class="status disconnected">Desconectado</div>
+    </header>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Slave</th>
+          <th>T1</th>
+          <th>T2</th>
+          <th>Última atualização</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr data-slave="1">
+          <td>1</td>
+          <td class="value empty">—</td>
+          <td class="value empty">—</td>
+          <td class="empty">—</td>
+        </tr>
+        <tr data-slave="2">
+          <td>2</td>
+          <td class="value empty">—</td>
+          <td class="value empty">—</td>
+          <td class="empty">—</td>
+        </tr>
+        <tr data-slave="3">
+          <td>3</td>
+          <td class="value empty">—</td>
+          <td class="value empty">—</td>
+          <td class="empty">—</td>
+        </tr>
+        <tr data-slave="4">
+          <td>4</td>
+          <td class="value empty">—</td>
+          <td class="value empty">—</td>
+          <td class="empty">—</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <script>
+    const statusEl = document.getElementById('connectionStatus');
+
+    function setStatus(connected) {
+      statusEl.textContent = connected ? 'Conectado' : 'Desconectado';
+      statusEl.classList.toggle('connected', connected);
+      statusEl.classList.toggle('disconnected', !connected);
+    }
+
+    function formatTemperature(value) {
+      if (typeof value !== 'number' || Number.isNaN(value)) {
+        return '—';
+      }
+      return `${value.toFixed(1)} °C`;
+    }
+
+    function formatTime(timestamp) {
+      const date = new Date(timestamp);
+      if (Number.isNaN(date.getTime())) {
+        return '—';
+      }
+      return date.toLocaleTimeString([], { hour12: false });
+    }
+
+    function updateRow(data) {
+      const row = document.querySelector(`tbody tr[data-slave="${data.slave}"]`);
+      if (!row) {
+        return;
+      }
+
+      const [t1Cell, t2Cell, tsCell] = row.querySelectorAll('td.value, td:last-child');
+      row.querySelector('td:nth-child(2)').textContent = formatTemperature(data.t1);
+      row.querySelector('td:nth-child(2)').classList.remove('empty');
+      row.querySelector('td:nth-child(3)').textContent = formatTemperature(data.t2);
+      row.querySelector('td:nth-child(3)').classList.remove('empty');
+      row.querySelector('td:nth-child(4)').textContent = formatTime(data.ts);
+      row.querySelector('td:nth-child(4)').classList.remove('empty');
+    }
+
+    function startWebSocket() {
+      const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const socketUrl = `${protocol}//${location.host}`;
+      const socket = new WebSocket(socketUrl);
+
+      socket.addEventListener('open', () => setStatus(true));
+      socket.addEventListener('close', () => setStatus(false));
+      socket.addEventListener('error', () => setStatus(false));
+      socket.addEventListener('message', (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload && payload.type === 'connection') {
+            return;
+          }
+
+          if (
+            payload &&
+            typeof payload.slave === 'number' &&
+            typeof payload.t1 !== 'undefined' &&
+            typeof payload.t2 !== 'undefined' &&
+            typeof payload.ts === 'string'
+          ) {
+            updateRow(payload);
+          }
+        } catch (error) {
+          console.warn('Mensagem WebSocket inválida:', error);
+        }
+      });
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      setStatus(false);
+      startWebSocket();
+    });
+  </script>
+</body>
+</html>

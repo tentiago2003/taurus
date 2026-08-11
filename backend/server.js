@@ -1,13 +1,32 @@
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
 const { WebSocketServer } = require('ws');
 const { startMqtt } = require('./mqtt/client');
 
 const port = Number(process.env.PORT) || 3000;
+const indexPath = path.join(__dirname, '..', 'frontend', 'index.html');
 
 const server = http.createServer((req, res) => {
-  res.statusCode = 200;
+  if (req.method === 'GET' && req.url === '/') {
+    fs.readFile(indexPath, 'utf8', (err, content) => {
+      if (err) {
+        res.statusCode = 500;
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.end('Internal Server Error');
+        return;
+      }
+
+      res.statusCode = 200;
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.end(content);
+    });
+    return;
+  }
+
+  res.statusCode = 404;
   res.setHeader('Content-Type', 'text/plain');
-  res.end('Taurus API is running');
+  res.end('Not Found');
 });
 
 const wss = new WebSocketServer({ server });
