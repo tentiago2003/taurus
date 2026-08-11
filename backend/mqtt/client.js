@@ -1,4 +1,6 @@
+require('dotenv').config();
 const mqtt = require('mqtt');
+const { parseMqttPayload } = require('./parser');
 
 const host = process.env.MQTT_HOST;
 const port = process.env.MQTT_PORT;
@@ -39,7 +41,12 @@ client.on('connect', () => {
 });
 
 client.on('message', (topic, payload) => {
-  console.log(`Message received from ${topic}: ${payload.toString()}`);
+  try {
+    const parsedPayload = parseMqttPayload(payload.toString());
+    console.log(`Parsed message from ${topic}:`, parsedPayload);
+  } catch (error) {
+    console.error(`Error parsing message from ${topic}: ${error.message}`);
+  }
 });
 
 client.on('error', (err) => {
