@@ -12,13 +12,6 @@ if (!host || !port) {
   process.exit(1);
 }
 
-const client = mqtt.connect({
-  host,
-  port: Number(port),
-  username,
-  password,
-});
-
 const topics = [
   'P2P-IoT/G001/LoRa1',
   'P2P-IoT/G001/LoRa2',
@@ -26,29 +19,45 @@ const topics = [
   'P2P-IoT/G001/LoRa4',
 ];
 
-client.on('connect', () => {
-  console.log('MQTT connection established');
+function startMqtt(onMessage) {
+  const client = mqtt.connect({
+    host,
+    port: Number(port),
+    username,
+    password,
+  });
 
-  topics.forEach((topic) => {
-    client.subscribe(topic, (err) => {
-      if (err) {
-        console.error(`Error subscribing to ${topic}:`, err);
-        return;
-      }
-      console.log(`Subscribed to ${topic}`);
+  client.on('connect', () => {
+    console.log('MQTT connection established');
+
+    topics.forEach((topic) => {
+      client.subscribe(topic, (err) => {
+        if (err) {
+          console.error(`Error subscribing to ${topic}:`, err);
+          return;
+        }
+        console.log(`Subscribed to ${topic}`);
+      });
     });
   });
-});
 
-client.on('message', (topic, payload) => {
-  try {
-    const parsedPayload = parseMqttPayload(payload.toString());
-    console.log(`Parsed message from ${topic}:`, parsedPayload);
-  } catch (error) {
-    console.error(`Error parsing message from ${topic}: ${error.message}`);
-  }
-});
+  client.on('message', (topic, payload) => {
+    try {
+      const parsedPayload = parseMqttPayload(payload.toString());
+      console.log(`Parsed message from ${topic}:`, parsedPayload);
+      if (parsedPayload && typeof onMessage === 'function') {
+        onMessage(parsedPayload);
+      }
+    } catch (error) {
+      console.error(`Error parsing message from ${topic}: ${error.message}`);
+    }
+  });
 
-client.on('error', (err) => {
-  console.error('MQTT connection error:', err);
-});
+  client.on('error', (err) => {
+    console.error('MQTT connection error:', err);
+  });
+}
+
+module.exports = {
+  startMqtt,
+};
