@@ -1,0 +1,21 @@
+{
+  "name": "taurus",
+  "version": "1.0.0",
+  "description": "Plataforma de monitoramento e gerenciamento de dispositivos IoT # Taurus",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tentiago2003/taurus.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/tentiago2003/taurus/issues"
+  },
+  "homepage": "https://github.com/tentiago2003/taurus#readme"
+}
