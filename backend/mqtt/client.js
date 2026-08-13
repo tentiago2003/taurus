@@ -1,6 +1,8 @@
 require('dotenv').config();
 const mqtt = require('mqtt');
 const { parseMqttPayload } = require('./parser');
+const path = require('path');
+const fs = require('fs');
 
 const host = process.env.MQTT_HOST;
 const port = process.env.MQTT_PORT;
@@ -12,12 +14,23 @@ if (!host || !port) {
   process.exit(1);
 }
 
-const topics = [
-  'P2P-IoT/G001/LoRa1',
-  'P2P-IoT/G001/LoRa2',
-  'P2P-IoT/G001/LoRa3',
-  'P2P-IoT/G001/LoRa4',
-];
+// Load MQTT topics from configuration file
+const topicsConfigPath = path.join(__dirname, '../../config/mqtt-topics.json');
+let topics;
+
+try {
+  const configContent = fs.readFileSync(topicsConfigPath, 'utf-8');
+  topics = JSON.parse(configContent);
+
+  if (!Array.isArray(topics) || topics.length === 0) {
+    throw new Error('Topics configuration must be a non-empty array');
+  }
+
+  console.log(`Loaded ${topics.length} MQTT topics from configuration`);
+} catch (error) {
+  console.error(`Error loading MQTT topics configuration from ${topicsConfigPath}:`, error.message);
+  process.exit(1);
+}
 
 function startMqtt(onMessage) {
   const client = mqtt.connect({
