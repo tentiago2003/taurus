@@ -24,8 +24,8 @@ function ConnectionPage({ isTestActive, onStartTest }) {
     port: DEFAULT_MQTT_PORT,
     user: DEFAULT_MQTT_USER,
     pass: DEFAULT_MQTT_PASS,
-    topics: DEFAULT_MQTT_TOPICS.join('\n'),
   })
+  const [topics, setTopics] = useState(DEFAULT_MQTT_TOPICS)
 
   const handleInputChange = (e) => {
     const { name, value } = e.target
@@ -35,9 +35,20 @@ function ConnectionPage({ isTestActive, onStartTest }) {
     }))
   }
 
+  const handleTopicChange = (index, value) => {
+    setTopics((prev) => prev.map((topic, i) => (i === index ? value : topic)))
+  }
+
+  const handleAddTopic = () => {
+    setTopics((prev) => [...prev, ''])
+  }
+
+  const handleRemoveTopic = (index) => {
+    setTopics((prev) => prev.filter((_, i) => i !== index))
+  }
+
   const handleTestConnection = () => {
-    const topicsArray = formData.topics
-      .split('\n')
+    const topicsArray = topics
       .map(t => t.trim())
       .filter(t => t.length > 0)
 
@@ -104,15 +115,30 @@ function ConnectionPage({ isTestActive, onStartTest }) {
         </div>
 
         <div className="form-group">
-          <label htmlFor="topics">Tópicos MQTT</label>
-          <textarea
-            id="topics"
-            name="topics"
-            value={formData.topics}
-            onChange={handleInputChange}
-            rows="6"
-            placeholder="Um tópico por linha"
-          ></textarea>
+          <label>Tópicos MQTT</label>
+          <div className="topics-list">
+            {topics.map((topic, index) => (
+              <div className="topic-row" key={index}>
+                <input
+                  type="text"
+                  value={topic}
+                  onChange={(e) => handleTopicChange(index, e.target.value)}
+                  placeholder="ex: P2P-IoT/G001/LoRa1"
+                />
+                <button
+                  type="button"
+                  className="btn-remove-topic"
+                  onClick={() => handleRemoveTopic(index)}
+                  aria-label="Remover tópico"
+                >
+                  −
+                </button>
+              </div>
+            ))}
+          </div>
+          <button type="button" className="btn-add-topic" onClick={handleAddTopic}>
+            + Adicionar tópico
+          </button>
         </div>
 
         <button className="btn-test" onClick={handleTestConnection} disabled={isTestActive}>

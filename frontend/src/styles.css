@@ -285,6 +285,73 @@ body {
   font-family: 'Courier New', monospace;
 }
 
+.topics-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.topic-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.topic-row input {
+  flex: 1;
+  background: #1a1a1a;
+  border: 1px solid #444;
+  color: #e0e0e0;
+  padding: 10px 12px;
+  border-radius: 4px;
+  font-family: 'Courier New', monospace;
+  font-size: 14px;
+  transition: border-color 0.2s ease;
+}
+
+.topic-row input:focus {
+  outline: none;
+  border-color: #d4af37;
+}
+
+.btn-remove-topic {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  background: #1a1a1a;
+  color: #d4af37;
+  border: 1px solid #444;
+  border-radius: 4px;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-remove-topic:hover {
+  border-color: #d4af37;
+  background: #3a3a3a;
+}
+
+.btn-add-topic {
+  background: transparent;
+  color: #d4af37;
+  border: 1px dashed #d4af37;
+  border-radius: 4px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.btn-add-topic:hover {
+  background: rgba(212, 175, 55, 0.1);
+}
+
 .btn-test {
   width: 100%;
   padding: 12px 16px;
