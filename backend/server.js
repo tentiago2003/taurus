@@ -2,8 +2,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { WebSocketServer } = require('ws');
-const mqtt = require('mqtt');
-const { startMqtt } = require('./mqtt/client');
+const { createMqttConnection, startMqtt } = require('./mqtt/client');
 
 const port = Number(process.env.PORT) || 3000;
 const distPath = path.join(__dirname, '..', 'frontend', 'dist');
@@ -26,119 +25,7 @@ function getContentType(filePath) {
   return mimeTypes[ext] || 'application/octet-stream';
 }
 
-// Helper function to read request body
-function readRequestBody(req) {
-  return new Promise((resolve, reject) => {
-    let body = '';
-    req.on('data', (chunk) => {
-      body += chunk;
-    });
-    req.on('end', () => {
-      resolve(body);
-    });
-    req.on('error', reject);
-  });
-}
-
-// Handle POST /api/mqtt/test
-async function handleMqttTest(req, res, body) {
-  try {
-    const data = JSON.parse(body);
-    const { host, port: mqttPort, username, password, topics } = data;
-
-    // Validation
-    if (!host || !mqttPort) {
-      res.statusCode = 400;
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({
-        success: false,
-        message: 'host and port are required',
-      }));
-      return;
-    }
-
-    if (!Array.isArray(topics) || topics.length === 0) {
-      res.statusCode = 400;
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({
-        success: false,
-        message: 'topics must be a non-empty array',
-      }));
-      return;
-    }
-
-    // Create temporary MQTT connection
-    const testClient = mqtt.connect({
-      host,
-      port: Number(mqttPort),
-      username,
-      password,
-      connectTimeout: 5000,
-    });
-
-    // Setup success/error handlers with timeout
-    let connected = false;
-    let responded = false;
-
-    const timeoutHandle = setTimeout(() => {
-      if (!responded) {
-        responded = true;
-        testClient.end(true);
-        res.statusCode = 502;
-        res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({
-          success: false,
-          message: 'MQTT connection timeout',
-        }));
-      }
-    }, 8000);
-
-    testClient.on('connect', () => {
-      connected = true;
-      if (!responded) {
-        responded = true;
-        clearTimeout(timeoutHandle);
-        testClient.end(true);
-        res.statusCode = 200;
-        res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({
-          success: true,
-          message: 'MQTT connection successful',
-        }));
-      }
-    });
-
-    testClient.on('error', (error) => {
-      if (!responded) {
-        responded = true;
-        clearTimeout(timeoutHandle);
-        testClient.end(true);
-        res.statusCode = 400;
-        res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({
-          success: false,
-          message: `MQTT connection error: ${error.message}`,
-        }));
-      }
-    });
-  } catch (err) {
-    res.statusCode = 400;
-    res.setHeader('Content-Type', 'application/json');
-    res.end(JSON.stringify({
-      success: false,
-      message: `Invalid request: ${err.message}`,
-    }));
-  }
-}
-
 const server = http.createServer(async (req, res) => {
-  // Handle POST /api/mqtt/test
-  if (req.method === 'POST' && req.url === '/api/mqtt/test') {
-    const body = await readRequestBody(req);
-    await handleMqttTest(req, res, body);
-    return;
-  }
-
   if (req.method !== 'GET') {
     res.statusCode = 404;
     res.setHeader('Content-Type', 'text/plain');
@@ -205,6 +92,104 @@ wss.on('connection', (ws) => {
     type: 'connection',
     message: 'Taurus WebSocket connected',
   }));
+
+  let testConnection;
+
+  function sendTestStatus(status, message) {
+    if (ws.readyState !== ws.OPEN) {
+      return;
+    }
+
+    ws.send(JSON.stringify({
+      type: 'mqtt_test_status',
+      status,
+      ...(message ? { message } : {}),
+    }));
+  }
+
+  function stopMqttTest(notify = true) {
+    if (!testConnection) {
+      return;
+    }
+
+    testConnection.disconnect();
+    testConnection = undefined;
+    if (notify) {
+      sendTestStatus('disconnected');
+    }
+  }
+
+  function handleTestError(connection, error) {
+    if (testConnection !== connection) {
+      return;
+    }
+
+    sendTestStatus('error', `Não foi possível concluir o teste MQTT: ${error.message}`);
+    stopMqttTest(false);
+  }
+
+  function startMqttTest(config) {
+    if (testConnection) {
+      sendTestStatus('error', 'Já existe um teste MQTT ativo nesta conexão.');
+      return;
+    }
+
+    const topics = Array.isArray(config.topics)
+      ? config.topics.map((topic) => String(topic).trim()).filter(Boolean)
+      : [];
+    const mqttPort = Number(config.port);
+
+    if (!config.host || !Number.isInteger(mqttPort) || mqttPort <= 0 || topics.length === 0) {
+      sendTestStatus('error', 'Informe host, porta válida e ao menos um tópico MQTT.');
+      return;
+    }
+
+    sendTestStatus('connecting');
+    const connection = createMqttConnection({
+      host: config.host,
+      port: mqttPort,
+      username: config.username,
+      password: config.password,
+    });
+    testConnection = connection;
+
+    connection
+      .onConnect(async () => {
+        try {
+          await connection.subscribe(topics);
+          if (testConnection === connection) {
+            sendTestStatus('connected');
+          }
+        } catch (error) {
+          handleTestError(connection, error);
+        }
+      })
+      .onMessage((data) => {
+        if (testConnection === connection && ws.readyState === ws.OPEN) {
+          ws.send(JSON.stringify({ type: 'mqtt_test_message', data }));
+        }
+      })
+      .onError((error) => handleTestError(connection, error));
+
+    connection.connect();
+  }
+
+  ws.on('message', (message) => {
+    try {
+      const payload = JSON.parse(message.toString());
+      if (payload.type === 'mqtt_test_start') {
+        startMqttTest(payload.config || {});
+      } else if (payload.type === 'mqtt_test_stop') {
+        stopMqttTest();
+      }
+    } catch (error) {
+      sendTestStatus('error', 'Mensagem de controle MQTT inválida.');
+    }
+  });
+
+  ws.on('close', () => {
+    stopMqttTest(false);
+  });
 });
 
 function broadcastToOpenClients(message) {

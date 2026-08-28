@@ -353,6 +353,65 @@ body {
   background: rgba(244, 67, 54, 0.1);
 }
 
+/* ============ MQTT TEST MODAL ============ */
+
+.mqtt-test-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.72);
+}
+
+.mqtt-test-modal {
+  width: min(760px, 100%);
+  max-height: min(680px, 100%);
+  overflow: auto;
+  padding: 28px;
+  border: 1px solid #d4af37;
+  border-radius: 8px;
+  background: #2d2d2d;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+}
+
+.mqtt-test-modal h2 {
+  color: #d4af37;
+  font-size: 24px;
+}
+
+.mqtt-test-description {
+  margin: 6px 0 24px;
+  color: #a0a0a0;
+}
+
+.mqtt-test-description.connected {
+  color: #a0d995;
+}
+
+.mqtt-test-description.error {
+  color: #f44336;
+}
+
+.btn-close-test {
+  width: 100%;
+  margin-top: 24px;
+  padding: 12px 16px;
+  border: 1px solid #d4af37;
+  border-radius: 4px;
+  background: transparent;
+  color: #d4af37;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.btn-close-test:hover {
+  background: rgba(212, 175, 55, 0.12);
+}
+
 /* ============ FOOTER ============ */
 
 .app-footer {

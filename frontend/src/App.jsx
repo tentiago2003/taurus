@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
 const APP_VERSION = '0.1.0'
 const DEFAULT_MQTT_HOST = 'broker.hivemq.com'
@@ -18,8 +18,7 @@ function HomePage() {
   )
 }
 
-function ConnectionPage() {
-  const [testStatus, setTestStatus] = useState('untested') // 'untested', 'testing', 'success', 'error'
+function ConnectionPage({ isTestActive, onStartTest }) {
   const [formData, setFormData] = useState({
     host: DEFAULT_MQTT_HOST,
     port: DEFAULT_MQTT_PORT,
@@ -36,44 +35,19 @@ function ConnectionPage() {
     }))
   }
 
-  const handleTestConnection = async () => {
-    setTestStatus('testing')
-    
-    // Parse topics from textarea (one per line)
+  const handleTestConnection = () => {
     const topicsArray = formData.topics
       .split('\n')
       .map(t => t.trim())
       .filter(t => t.length > 0)
-    
-    // Prepare request payload
-    const payload = {
+
+    onStartTest({
       host: formData.host,
       port: formData.port,
       username: formData.user,
       password: formData.pass,
       topics: topicsArray,
-    }
-    
-    try {
-      const response = await fetch('/api/mqtt/test', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      })
-      
-      const data = await response.json()
-      
-      if (response.ok && data.success) {
-        setTestStatus('success')
-      } else {
-        setTestStatus('error')
-      }
-    } catch (err) {
-      console.error('Test connection error:', err)
-      setTestStatus('error')
-    }
+    })
   }
 
   return (
@@ -141,17 +115,53 @@ function ConnectionPage() {
           ></textarea>
         </div>
 
-        <button className="btn-test" onClick={handleTestConnection}>
+        <button className="btn-test" onClick={handleTestConnection} disabled={isTestActive}>
           Testar conexão
         </button>
-
-        <div className={`test-status ${testStatus}`}>
-          {testStatus === 'untested' && <p>Conexão não testada</p>}
-          {testStatus === 'testing' && <p>Testando conexão...</p>}
-          {testStatus === 'success' && <p>✓ Conexão bem-sucedida</p>}
-          {testStatus === 'error' && <p>✗ Falha na conexão</p>}
-        </div>
       </div>
+    </div>
+  )
+}
+
+function MqttTestModal({ session, onClose }) {
+  const statusContent = {
+    connecting: ['Testando conexão...', 'Conectando ao broker MQTT...'],
+    connected: ['Conectado', 'Recebendo dados...'],
+    error: ['Falha na conexão', session.message || 'Não foi possível conectar ao broker MQTT.'],
+  }
+  const [title, description] = statusContent[session.status] || statusContent.connecting
+  const slaves = Object.entries(session.slaves)
+
+  return (
+    <div className="mqtt-test-backdrop" role="presentation">
+      <section className="mqtt-test-modal" role="dialog" aria-modal="true" aria-labelledby="mqtt-test-title">
+        <h2 id="mqtt-test-title">{title}</h2>
+        <p className={`mqtt-test-description ${session.status}`}>{description}</p>
+
+        {session.status === 'connected' && (
+          <div className="slaves-container">
+            <table className="slaves-table">
+              <thead>
+                <tr><th>Slave</th><th>T1</th><th>T2</th><th>Última atualização</th></tr>
+              </thead>
+              <tbody>
+                {slaves.length === 0 ? (
+                  <tr><td className="empty" colSpan="4">Aguardando mensagens MQTT...</td></tr>
+                ) : slaves.map(([slave, data]) => (
+                  <tr key={slave}>
+                    <td>{slave}</td>
+                    <td className="value">{data.t1}</td>
+                    <td className="value">{data.t2}</td>
+                    <td>{data.ts}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <button className="btn-close-test" onClick={onClose}>Fechar teste</button>
+      </section>
     </div>
   )
 }
@@ -160,6 +170,13 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [currentPage, setCurrentPage] = useState('home')
   const [isConnected, setIsConnected] = useState(false)
+  const socketRef = useRef(null)
+  const [mqttTestSession, setMqttTestSession] = useState({
+    isOpen: false,
+    status: 'connecting',
+    message: '',
+    slaves: {},
+  })
   const [slaves, setSlaves] = useState({
     1: { t1: null, t2: null, ts: null },
     2: { t1: null, t2: null, ts: null },
@@ -171,6 +188,7 @@ function App() {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
     const socketUrl = `${protocol}//${location.host}`
     const socket = new WebSocket(socketUrl)
+    socketRef.current = socket
 
     const handleOpen = () => {
       setIsConnected(true)
@@ -190,6 +208,28 @@ function App() {
 
         // Ignore connection messages
         if (payload && payload.type === 'connection') {
+          return
+        }
+
+        if (payload && payload.type === 'mqtt_test_status') {
+          setMqttTestSession((previous) => ({
+            ...previous,
+            isOpen: payload.status !== 'disconnected',
+            status: payload.status,
+            message: payload.message || '',
+          }))
+          return
+        }
+
+        if (payload && payload.type === 'mqtt_test_message' && payload.data) {
+          const { slave, t1, t2, ts } = payload.data
+          setMqttTestSession((previous) => ({
+            ...previous,
+            slaves: {
+              ...previous.slaves,
+              [slave]: { t1, t2, ts },
+            },
+          }))
           return
         }
 
@@ -226,8 +266,31 @@ function App() {
       socket.removeEventListener('error', handleError)
       socket.removeEventListener('message', handleMessage)
       socket.close()
+      socketRef.current = null
     }
   }, [])
+
+  const startMqttTest = (config) => {
+    setMqttTestSession({ isOpen: true, status: 'connecting', message: '', slaves: {} })
+    const socket = socketRef.current
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      setMqttTestSession((previous) => ({
+        ...previous,
+        status: 'error',
+        message: 'A conexão com o servidor Taurus não está disponível.',
+      }))
+      return
+    }
+    socket.send(JSON.stringify({ type: 'mqtt_test_start', config }))
+  }
+
+  const stopMqttTest = () => {
+    const socket = socketRef.current
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: 'mqtt_test_stop' }))
+    }
+    setMqttTestSession({ isOpen: false, status: 'connecting', message: '', slaves: {} })
+  }
 
   const formatBuildTime = (isoString) => {
     try {
@@ -312,9 +375,13 @@ function App() {
 
         <main className="main-content">
           {currentPage === 'home' && <HomePage />}
-          {currentPage === 'connection' && <ConnectionPage />}
+          {currentPage === 'connection' && (
+            <ConnectionPage isTestActive={mqttTestSession.isOpen} onStartTest={startMqttTest} />
+          )}
         </main>
       </div>
+
+      {mqttTestSession.isOpen && <MqttTestModal session={mqttTestSession} onClose={stopMqttTest} />}
 
       <footer className="app-footer">
         <div className="footer-content">

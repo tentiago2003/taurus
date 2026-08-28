@@ -32,45 +32,115 @@ try {
   process.exit(1);
 }
 
+function createMqttConnection(config) {
+  let client;
+  let onConnect;
+  let onError;
+  let onMessage;
+
+  function connect() {
+    client = mqtt.connect({
+      host: config.host,
+      port: Number(config.port),
+      username: config.username,
+      password: config.password,
+      connectTimeout: config.connectTimeout,
+    });
+
+    client.on('connect', () => {
+      if (typeof onConnect === 'function') {
+        onConnect();
+      }
+    });
+
+    client.on('message', (topic, payload) => {
+      try {
+        const parsedPayload = parseMqttPayload(payload.toString());
+        console.log(`Parsed message from ${topic}:`, parsedPayload);
+        if (parsedPayload && typeof onMessage === 'function') {
+          onMessage(parsedPayload);
+        }
+      } catch (error) {
+        console.error(`Error parsing message from ${topic}: ${error.message}`);
+      }
+    });
+
+    client.on('error', (error) => {
+      if (typeof onError === 'function') {
+        onError(error);
+      }
+    });
+  }
+
+  function subscribe(subscribeTopics) {
+    return new Promise((resolve, reject) => {
+      if (!client) {
+        reject(new Error('MQTT client is not connected'));
+        return;
+      }
+
+      client.subscribe(subscribeTopics, (error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
+  }
+
+  function disconnect() {
+    if (client) {
+      client.removeAllListeners();
+      client.end(true);
+      client = undefined;
+    }
+  }
+
+  return {
+    connect,
+    subscribe,
+    disconnect,
+    onConnect(callback) {
+      onConnect = callback;
+      return this;
+    },
+    onError(callback) {
+      onError = callback;
+      return this;
+    },
+    onMessage(callback) {
+      onMessage = callback;
+      return this;
+    },
+  };
+}
+
 function startMqtt(onMessage) {
-  const client = mqtt.connect({
+  const connection = createMqttConnection({
     host,
-    port: Number(port),
+    port,
     username,
     password,
   });
 
-  client.on('connect', () => {
-    console.log('MQTT connection established');
-
-    topics.forEach((topic) => {
-      client.subscribe(topic, (err) => {
-        if (err) {
-          console.error(`Error subscribing to ${topic}:`, err);
-          return;
-        }
-        console.log(`Subscribed to ${topic}`);
-      });
-    });
-  });
-
-  client.on('message', (topic, payload) => {
-    try {
-      const parsedPayload = parseMqttPayload(payload.toString());
-      console.log(`Parsed message from ${topic}:`, parsedPayload);
-      if (parsedPayload && typeof onMessage === 'function') {
-        onMessage(parsedPayload);
+  connection
+    .onConnect(async () => {
+      console.log('MQTT connection established');
+      try {
+        await connection.subscribe(topics);
+        topics.forEach((topic) => console.log(`Subscribed to ${topic}`));
+      } catch (error) {
+        console.error('Error subscribing to MQTT topics:', error);
       }
-    } catch (error) {
-      console.error(`Error parsing message from ${topic}: ${error.message}`);
-    }
-  });
+    })
+    .onMessage(onMessage)
+    .onError((error) => console.error('MQTT connection error:', error));
 
-  client.on('error', (err) => {
-    console.error('MQTT connection error:', err);
-  });
+  connection.connect();
 }
 
 module.exports = {
+  createMqttConnection,
   startMqtt,
 };
