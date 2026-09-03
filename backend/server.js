@@ -4,6 +4,7 @@ const path = require('path');
 const { WebSocketServer } = require('ws');
 const { createMqttConnection, startMqtt } = require('./mqtt/client');
 const { initDatabase } = require('./db');
+const { handleApiRequest } = require('./http/api');
 
 initDatabase();
 
@@ -29,6 +30,10 @@ function getContentType(filePath) {
 }
 
 const server = http.createServer(async (req, res) => {
+  if (await handleApiRequest(req, res)) {
+    return;
+  }
+
   if (req.method !== 'GET') {
     res.statusCode = 404;
     res.setHeader('Content-Type', 'text/plain');
