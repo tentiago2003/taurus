@@ -50,7 +50,7 @@ function closeDatabase() {
 
 function seedProfiles(database) {
   const insert = database.prepare(
-    'INSERT OR IGNORE INTO profiles (name, description) VALUES (?, ?)'
+    'INSERT OR IGNORE INTO profiles (name, description, active, is_system) VALUES (?, ?, 1, 1)'
   );
   for (const profile of DEFAULT_PROFILES) {
     insert.run(profile.name, profile.description);

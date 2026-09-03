@@ -17,13 +17,15 @@ CREATE TABLE IF NOT EXISTS profiles (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   name        TEXT NOT NULL UNIQUE,
   description TEXT,
+  active      INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+  is_system   INTEGER NOT NULL DEFAULT 0 CHECK (is_system IN (0, 1)),
   created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
 CREATE TABLE IF NOT EXISTS users (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  company_id    INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  company_id    INTEGER REFERENCES companies(id) ON DELETE CASCADE,
   profile_id    INTEGER NOT NULL REFERENCES profiles(id),
   name          TEXT NOT NULL,
   email         TEXT NOT NULL UNIQUE,
@@ -58,6 +60,7 @@ CREATE TABLE IF NOT EXISTS data_sources (
   id                         INTEGER PRIMARY KEY AUTOINCREMENT,
   connection_id              INTEGER NOT NULL REFERENCES connections(id) ON DELETE CASCADE,
   name                       TEXT NOT NULL,
+  type                       TEXT NOT NULL,
   topic                      TEXT,
   sampling_interval_seconds  INTEGER NOT NULL DEFAULT 600 CHECK (sampling_interval_seconds > 0),
   store_history              INTEGER NOT NULL DEFAULT 1 CHECK (store_history IN (0, 1)),
