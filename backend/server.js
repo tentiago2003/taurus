@@ -3,6 +3,9 @@ const fs = require('fs');
 const path = require('path');
 const { WebSocketServer } = require('ws');
 const { createMqttConnection, startMqtt } = require('./mqtt/client');
+const { initDatabase } = require('./db');
+
+initDatabase();
 
 const port = Number(process.env.PORT) || 3000;
 const distPath = path.join(__dirname, '..', 'frontend', 'dist');
