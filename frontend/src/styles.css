@@ -220,6 +220,65 @@ body {
   font-style: italic;
 }
 
+/* ============ STATUS BADGE / TABLE ACTIONS ============ */
+
+.status-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.status-badge.active {
+  color: #a0d995;
+  background: rgba(76, 175, 80, 0.15);
+}
+
+.status-badge.inactive {
+  color: #999;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.table-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.btn-small {
+  background: transparent;
+  color: #d4af37;
+  border: 1px solid #444;
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-small:hover:not(:disabled) {
+  border-color: #d4af37;
+  background: rgba(212, 175, 55, 0.1);
+}
+
+.btn-small:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-small.danger {
+  color: #f44336;
+}
+
+.btn-small.danger:hover:not(:disabled) {
+  border-color: #f44336;
+  background: rgba(244, 67, 54, 0.1);
+}
+
 /* ============ EMPTY STATE ============ */
 
 .empty-state {

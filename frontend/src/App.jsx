@@ -1,4 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
+import {
+  fetchCompanies,
+  createCompany,
+  updateCompany,
+  deactivateCompany,
+  reactivateCompany,
+  deleteCompany,
+} from './api'
 
 const APP_VERSION = '0.1.0'
 const DEFAULT_MQTT_HOST = 'broker.hivemq.com'
@@ -14,6 +22,284 @@ function HomePage() {
       <div className="empty-state">
         <p>Selecione uma opção no menu para começar.</p>
       </div>
+    </div>
+  )
+}
+
+function CompaniesPage() {
+  const [companies, setCompanies] = useState([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [name, setName] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [formError, setFormError] = useState('')
+  const [actionError, setActionError] = useState('')
+  const [editingId, setEditingId] = useState(null)
+  const [editingName, setEditingName] = useState('')
+  const [busyId, setBusyId] = useState(null)
+
+  const loadCompanies = async () => {
+    setIsLoading(true)
+    setLoadError('')
+    try {
+      const data = await fetchCompanies()
+      setCompanies(data)
+    } catch (err) {
+      setLoadError(err.message || 'Não foi possível carregar as empresas.')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadCompanies()
+  }, [])
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setFormError('')
+
+    if (!name.trim()) {
+      setFormError('Informe o nome da empresa.')
+      return
+    }
+
+    setIsSubmitting(true)
+    try {
+      await createCompany({ name: name.trim() })
+      setName('')
+      await loadCompanies()
+    } catch (err) {
+      setFormError(err.message || 'Não foi possível criar a empresa.')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const startEditing = (company) => {
+    setActionError('')
+    setEditingId(company.id)
+    setEditingName(company.name)
+  }
+
+  const cancelEditing = () => {
+    setEditingId(null)
+    setEditingName('')
+  }
+
+  const handleSaveEdit = async (companyId) => {
+    if (!editingName.trim()) {
+      setActionError('Informe o nome da empresa.')
+      return
+    }
+
+    setActionError('')
+    setBusyId(companyId)
+    try {
+      await updateCompany(companyId, { name: editingName.trim() })
+      cancelEditing()
+      await loadCompanies()
+    } catch (err) {
+      setActionError(err.message || 'Não foi possível atualizar a empresa.')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const handleDeactivate = async (company) => {
+    if (!window.confirm(`Desativar a empresa "${company.name}"?`)) {
+      return
+    }
+    setActionError('')
+    setBusyId(company.id)
+    try {
+      await deactivateCompany(company.id)
+      await loadCompanies()
+    } catch (err) {
+      setActionError(err.message || 'Não foi possível desativar a empresa.')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const handleReactivate = async (company) => {
+    setActionError('')
+    setBusyId(company.id)
+    try {
+      await reactivateCompany(company.id)
+      await loadCompanies()
+    } catch (err) {
+      setActionError(err.message || 'Não foi possível reativar a empresa.')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const handleDelete = async (company) => {
+    if (!window.confirm(`Excluir definitivamente a empresa "${company.name}"? Esta ação não pode ser desfeita.`)) {
+      return
+    }
+    setActionError('')
+    setBusyId(company.id)
+    try {
+      await deleteCompany(company.id)
+      await loadCompanies()
+    } catch (err) {
+      setActionError(err.message || 'Não foi possível excluir a empresa.')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  return (
+    <div className="page-content">
+      <h2>Empresas</h2>
+      <p className="page-description">Cadastre e visualize as empresas do Taurus.</p>
+
+      <div className="connection-form">
+        <form onSubmit={handleSubmit}>
+          <div className="form-group">
+            <label htmlFor="company-name">Nome</label>
+            <input
+              type="text"
+              id="company-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Nome da empresa"
+              disabled={isSubmitting}
+            />
+          </div>
+
+          {formError && (
+            <div className="test-status error">
+              <p>{formError}</p>
+            </div>
+          )}
+
+          <button className="btn-test" type="submit" disabled={isSubmitting}>
+            {isSubmitting ? 'Salvando...' : 'Adicionar empresa'}
+          </button>
+        </form>
+      </div>
+
+      {loadError && (
+        <div className="test-status error">
+          <p>{loadError}</p>
+        </div>
+      )}
+
+      {actionError && (
+        <div className="test-status error">
+          <p>{actionError}</p>
+        </div>
+      )}
+
+      {isLoading ? (
+        <div className="empty-state">
+          <p>Carregando empresas...</p>
+        </div>
+      ) : companies.length === 0 ? (
+        !loadError && (
+          <div className="empty-state">
+            <p>Nenhuma empresa cadastrada.</p>
+          </div>
+        )
+      ) : (
+        <div className="slaves-container">
+          <table className="slaves-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Nome</th>
+                <th>Status</th>
+                <th>Criada em</th>
+                <th>Ações</th>
+              </tr>
+            </thead>
+            <tbody>
+              {companies.map((company) => (
+                <tr key={company.id}>
+                  <td>{company.id}</td>
+                  <td>
+                    {editingId === company.id ? (
+                      <input
+                        type="text"
+                        value={editingName}
+                        onChange={(e) => setEditingName(e.target.value)}
+                        disabled={busyId === company.id}
+                      />
+                    ) : (
+                      company.name
+                    )}
+                  </td>
+                  <td>
+                    <span className={`status-badge ${company.active ? 'active' : 'inactive'}`}>
+                      {company.active ? 'Ativa' : 'Inativa'}
+                    </span>
+                  </td>
+                  <td>{company.created_at}</td>
+                  <td>
+                    <div className="table-actions">
+                      {editingId === company.id ? (
+                        <>
+                          <button
+                            className="btn-small"
+                            onClick={() => handleSaveEdit(company.id)}
+                            disabled={busyId === company.id}
+                          >
+                            Salvar
+                          </button>
+                          <button
+                            className="btn-small"
+                            onClick={cancelEditing}
+                            disabled={busyId === company.id}
+                          >
+                            Cancelar
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            className="btn-small"
+                            onClick={() => startEditing(company)}
+                            disabled={busyId === company.id}
+                          >
+                            Editar
+                          </button>
+                          {company.active ? (
+                            <button
+                              className="btn-small"
+                              onClick={() => handleDeactivate(company)}
+                              disabled={busyId === company.id}
+                            >
+                              Desativar
+                            </button>
+                          ) : (
+                            <button
+                              className="btn-small"
+                              onClick={() => handleReactivate(company)}
+                              disabled={busyId === company.id}
+                            >
+                              Reativar
+                            </button>
+                          )}
+                          <button
+                            className="btn-small danger"
+                            onClick={() => handleDelete(company)}
+                            disabled={busyId === company.id}
+                          >
+                            Excluir
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   )
 }
@@ -394,6 +680,12 @@ function App() {
             >
               Conexão
             </button>
+            <button
+              className={`nav-item ${currentPage === 'companies' ? 'active' : ''}`}
+              onClick={() => handlePageChange('companies')}
+            >
+              Empresas
+            </button>
           </nav>
         </aside>
 
@@ -404,6 +696,7 @@ function App() {
           {currentPage === 'connection' && (
             <ConnectionPage isTestActive={mqttTestSession.isOpen} onStartTest={startMqttTest} />
           )}
+          {currentPage === 'companies' && <CompaniesPage />}
         </main>
       </div>
 

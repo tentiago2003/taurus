@@ -7,6 +7,7 @@ PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS companies (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   name        TEXT NOT NULL UNIQUE,
+  active      INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
   created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,

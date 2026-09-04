@@ -40,6 +40,42 @@ const companies = {
       .run(name, createdBy, createdBy);
     return this.findById(result.lastInsertRowid);
   },
+  update({ id, name, updatedBy = null }) {
+    getDatabase()
+      .prepare(
+        `UPDATE companies
+         SET name = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), updated_by = ?
+         WHERE id = ?`
+      )
+      .run(name, updatedBy, id);
+    return this.findById(id);
+  },
+  setActive({ id, active, updatedBy = null }) {
+    getDatabase()
+      .prepare(
+        `UPDATE companies
+         SET active = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), updated_by = ?
+         WHERE id = ?`
+      )
+      .run(active ? 1 : 0, updatedBy, id);
+    return this.findById(id);
+  },
+  remove(id) {
+    return getDatabase().prepare('DELETE FROM companies WHERE id = ?').run(id).changes > 0;
+  },
+  /** Conta registros dependentes usados para bloquear exclusão definitiva. */
+  countDependents(id) {
+    const db = getDatabase();
+    return {
+      users: db.prepare('SELECT COUNT(*) AS count FROM users WHERE company_id = ?').get(id).count,
+      connections: db
+        .prepare('SELECT COUNT(*) AS count FROM connections WHERE company_id = ?')
+        .get(id).count,
+      dashboards: db
+        .prepare('SELECT COUNT(*) AS count FROM dashboards WHERE company_id = ?')
+        .get(id).count,
+    };
+  },
 };
 
 const profiles = {

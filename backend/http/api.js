@@ -13,13 +13,13 @@ async function handleApiRequest(req, res) {
     return false;
   }
 
-  const handler = router.find(req.method, pathname);
-  if (!handler) {
+  const match = router.find(req.method, pathname);
+  if (!match) {
     sendJson(res, 404, { error: 'Rota não encontrada.' });
     return true;
   }
 
-  await handler(req, res);
+  await match.handler(req, res, match.params);
   return true;
 }
 

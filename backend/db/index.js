@@ -29,10 +29,22 @@ function initDatabase() {
   db.exec('PRAGMA foreign_keys = ON;');
   db.exec(fs.readFileSync(SCHEMA_PATH, 'utf-8'));
 
+  migrateCompaniesActiveColumn(db);
   seedProfiles(db);
   seedSystemSettings(db);
 
   return db;
+}
+
+/** Migração idempotente: adiciona a coluna active a bancos criados antes dela existir. */
+function migrateCompaniesActiveColumn(database) {
+  const columns = database.prepare('PRAGMA table_info(companies)').all();
+  const hasActive = columns.some((column) => column.name === 'active');
+  if (!hasActive) {
+    database.exec(
+      'ALTER TABLE companies ADD COLUMN active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1))'
+    );
+  }
 }
 
 /** Retorna a instância aberta do banco; inicializa se necessário. */

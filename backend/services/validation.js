@@ -33,4 +33,13 @@ function optionalInt(value) {
   return num;
 }
 
-module.exports = { requireString, optionalString, requireInt, optionalInt, ApiError };
+/** Converte um parâmetro de rota (string) em um id inteiro positivo. */
+function parseIdParam(value) {
+  const id = Number(value);
+  if (!Number.isInteger(id) || id <= 0) {
+    throw new ApiError(400, 'Identificador inválido.');
+  }
+  return id;
+}
+
+module.exports = { requireString, optionalString, requireInt, optionalInt, parseIdParam, ApiError };
