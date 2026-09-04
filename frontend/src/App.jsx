@@ -12,6 +12,9 @@ import {
   updateUser,
   deactivateUser,
   reactivateUser,
+  login,
+  fetchCurrentUser,
+  logout,
 } from './api'
 
 const APP_VERSION = '0.1.0'
@@ -20,6 +23,59 @@ const DEFAULT_MQTT_PORT = '1883'
 const DEFAULT_MQTT_USER = 'CTa_Mqtt'
 const DEFAULT_MQTT_PASS = 'Senha_cta'
 const DEFAULT_MQTT_TOPICS = ['P2P-IoT/G001/LoRa1', 'P2P-IoT/G001/LoRa2', 'P2P-IoT/G001/LoRa3', 'P2P-IoT/G001/LoRa4']
+
+function LoginPage({ onLogin }) {
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  const handleSubmit = async (event) => {
+    event.preventDefault()
+    setError('')
+    setIsSubmitting(true)
+    try {
+      const result = await login(email.trim(), password)
+      onLogin(result.user)
+    } catch (err) {
+      setError(err.message || 'Não foi possível entrar no Taurus.')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="login-screen">
+      <div className="login-card">
+        <div className="header-brand login-brand">
+          <svg className="taurus-symbol" viewBox="0 0 40 40" width="32" height="32">
+            <circle cx="20" cy="20" r="18" fill="none" stroke="#d4af37" strokeWidth="2" />
+            <path d="M 14 16 Q 20 12 26 16" fill="none" stroke="#d4af37" strokeWidth="2" strokeLinecap="round" />
+            <line x1="14" y1="16" x2="12" y2="10" stroke="#d4af37" strokeWidth="2" strokeLinecap="round" />
+            <line x1="26" y1="16" x2="28" y2="10" stroke="#d4af37" strokeWidth="2" strokeLinecap="round" />
+            <path d="M 15 20 L 20 28 L 25 20" fill="none" stroke="#d4af37" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <h1 className="header-title">Taurus</h1>
+        </div>
+        <h2>Entrar</h2>
+        <form onSubmit={handleSubmit}>
+          <div className="form-group">
+            <label htmlFor="login-email">E-mail</label>
+            <input id="login-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" required />
+          </div>
+          <div className="form-group">
+            <label htmlFor="login-password">Senha</label>
+            <input id="login-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required />
+          </div>
+          {error && <div className="test-status error"><p>{error}</p></div>}
+          <button className="btn-test" type="submit" disabled={isSubmitting}>
+            {isSubmitting ? 'Entrando...' : 'Entrar'}
+          </button>
+        </form>
+      </div>
+    </div>
+  )
+}
 
 function HomePage() {
   return (
@@ -923,6 +979,9 @@ function MqttTestModal({ session, onClose }) {
 }
 
 function App() {
+  const [currentUser, setCurrentUser] = useState(null)
+  const [authLoading, setAuthLoading] = useState(true)
+  const [authError, setAuthError] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [currentPage, setCurrentPage] = useState('home')
   const [isConnected, setIsConnected] = useState(false)
@@ -939,6 +998,31 @@ function App() {
     3: { t1: null, t2: null, ts: null },
     4: { t1: null, t2: null, ts: null },
   })
+
+  useEffect(() => {
+    fetchCurrentUser()
+      .then((result) => {
+        if (result.user) {
+          setCurrentUser(result.user)
+        }
+      })
+      .catch((err) => setAuthError(err.message || 'Não foi possível verificar a sessão.'))
+      .finally(() => setAuthLoading(false))
+  }, [])
+
+  const handleLogin = (user) => {
+    setAuthError('')
+    setCurrentUser(user)
+  }
+
+  const handleLogout = async () => {
+    try {
+      await logout()
+    } finally {
+      setCurrentUser(null)
+      setCurrentPage('home')
+    }
+  }
 
   useEffect(() => {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -1073,6 +1157,14 @@ function App() {
     closeSidebarOnMobile()
   }
 
+  if (authLoading) {
+    return <div className="login-screen"><div className="empty-state"><p>Carregando...</p></div></div>
+  }
+
+  if (!currentUser) {
+    return <LoginPage onLogin={handleLogin} />
+  }
+
   return (
     <div className="app">
       <header className="app-header">
@@ -1107,6 +1199,12 @@ function App() {
           </svg>
           <h1 className="header-title">Taurus</h1>
         </div>
+        {currentUser && (
+          <div className="header-user">
+            <span>{currentUser.name}</span>
+            <button className="btn-small" onClick={handleLogout}>Sair</button>
+          </div>
+        )}
       </header>
 
       <div className="app-container">

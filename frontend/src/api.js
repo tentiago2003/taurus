@@ -20,6 +20,22 @@ async function request(path, options = {}) {
   return payload
 }
 
+
+export function login(email, password) {
+  return request('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email, password }),
+  })
+}
+
+export function fetchCurrentUser() {
+  return request('/auth/me')
+}
+
+export function logout() {
+  return request('/auth/logout', { method: 'POST' })
+}
+
 export function fetchCompanies() {
   return request('/companies')
 }
