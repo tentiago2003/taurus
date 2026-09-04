@@ -7,6 +7,17 @@ function requireString(value, fieldName) {
   return value.trim();
 }
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Valida formato básico de e-mail (sem verificação de domínio/DNS). */
+function requireEmail(value, fieldName = 'email') {
+  const email = requireString(value, fieldName).toLowerCase();
+  if (!EMAIL_PATTERN.test(email)) {
+    throw new ApiError(400, 'E-mail inválido.');
+  }
+  return email;
+}
+
 function optionalString(value) {
   if (value === undefined || value === null) {
     return null;
@@ -42,4 +53,12 @@ function parseIdParam(value) {
   return id;
 }
 
-module.exports = { requireString, optionalString, requireInt, optionalInt, parseIdParam, ApiError };
+module.exports = {
+  requireString,
+  requireEmail,
+  optionalString,
+  requireInt,
+  optionalInt,
+  parseIdParam,
+  ApiError,
+};

@@ -119,6 +119,42 @@ const users = {
       .run(companyId, profileId, name, email, passwordHash, createdBy, createdBy);
     return this.findById(result.lastInsertRowid);
   },
+  /** passwordHash nulo mantém a senha atual (troca é opcional na edição). */
+  update({ id, companyId, profileId, name, email, passwordHash = null, updatedBy = null }) {
+    if (passwordHash) {
+      getDatabase()
+        .prepare(
+          `UPDATE users
+           SET company_id = ?, profile_id = ?, name = ?, email = ?, password_hash = ?,
+               updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), updated_by = ?
+           WHERE id = ?`
+        )
+        .run(companyId, profileId, name, email, passwordHash, updatedBy, id);
+    } else {
+      getDatabase()
+        .prepare(
+          `UPDATE users
+           SET company_id = ?, profile_id = ?, name = ?, email = ?,
+               updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), updated_by = ?
+           WHERE id = ?`
+        )
+        .run(companyId, profileId, name, email, updatedBy, id);
+    }
+    return this.findById(id);
+  },
+  setActive({ id, active, updatedBy = null }) {
+    getDatabase()
+      .prepare(
+        `UPDATE users
+         SET active = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), updated_by = ?
+         WHERE id = ?`
+      )
+      .run(active ? 1 : 0, updatedBy, id);
+    return this.findById(id);
+  },
+  remove(id) {
+    return getDatabase().prepare('DELETE FROM users WHERE id = ?').run(id).changes > 0;
+  },
 };
 
 const systemSettings = {

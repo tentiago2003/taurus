@@ -4,7 +4,7 @@
   "description": "Plataforma de monitoramento e gerenciamento de dispositivos IoT # Taurus",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test backend/tests/*.test.js"
   },
   "repository": {
     "type": "git",

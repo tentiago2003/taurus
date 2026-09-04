@@ -6,6 +6,12 @@ import {
   deactivateCompany,
   reactivateCompany,
   deleteCompany,
+  fetchProfiles,
+  fetchUsers,
+  createUser,
+  updateUser,
+  deactivateUser,
+  reactivateUser,
 } from './api'
 
 const APP_VERSION = '0.1.0'
@@ -294,6 +300,444 @@ function CompaniesPage() {
                       )}
                     </div>
                   </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+const ADMIN_PROFILE_NAME = 'Admin'
+
+const emptyUserForm = { name: '', email: '', profileId: '', companyId: '', password: '' }
+
+function UsersPage() {
+  const [users, setUsers] = useState([])
+  const [profiles, setProfiles] = useState([])
+  const [companies, setCompanies] = useState([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+
+  const [form, setForm] = useState(emptyUserForm)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [formError, setFormError] = useState('')
+
+  const [actionError, setActionError] = useState('')
+  const [editingId, setEditingId] = useState(null)
+  const [editForm, setEditForm] = useState(emptyUserForm)
+  const [busyId, setBusyId] = useState(null)
+
+  const isAdminProfile = (profileId) =>
+    profiles.find((p) => p.id === Number(profileId))?.name === ADMIN_PROFILE_NAME
+
+  const profileName = (profileId) => profiles.find((p) => p.id === profileId)?.name || '—'
+  const companyName = (companyId) => companies.find((c) => c.id === companyId)?.name || '—'
+
+  const loadAll = async () => {
+    setIsLoading(true)
+    setLoadError('')
+    try {
+      const [usersData, profilesData, companiesData] = await Promise.all([
+        fetchUsers(),
+        fetchProfiles(),
+        fetchCompanies(),
+      ])
+      setUsers(usersData)
+      setProfiles(profilesData)
+      setCompanies(companiesData)
+    } catch (err) {
+      setLoadError(err.message || 'Não foi possível carregar os usuários.')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadAll()
+  }, [])
+
+  const handleFormChange = (e) => {
+    const { name, value } = e.target
+    setForm((prev) => ({ ...prev, [name]: value }))
+  }
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setFormError('')
+
+    if (!form.name.trim() || !form.email.trim() || !form.profileId || !form.password.trim()) {
+      setFormError('Preencha nome, e-mail, perfil e senha.')
+      return
+    }
+    if (!isAdminProfile(form.profileId) && !form.companyId) {
+      setFormError('Empresa é obrigatória para este perfil.')
+      return
+    }
+
+    setIsSubmitting(true)
+    try {
+      await createUser({
+        name: form.name.trim(),
+        email: form.email.trim(),
+        profileId: Number(form.profileId),
+        companyId: form.companyId ? Number(form.companyId) : null,
+        password: form.password,
+      })
+      setForm(emptyUserForm)
+      await loadAll()
+    } catch (err) {
+      setFormError(err.message || 'Não foi possível criar o usuário.')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const startEditing = (user) => {
+    setActionError('')
+    setEditingId(user.id)
+    setEditForm({
+      name: user.name,
+      email: user.email,
+      profileId: String(user.profile_id),
+      companyId: user.company_id ? String(user.company_id) : '',
+      password: '',
+    })
+  }
+
+  const cancelEditing = () => {
+    setEditingId(null)
+    setEditForm(emptyUserForm)
+  }
+
+  const handleEditChange = (e) => {
+    const { name, value } = e.target
+    setEditForm((prev) => ({ ...prev, [name]: value }))
+  }
+
+  const handleSaveEdit = async (userId) => {
+    if (!editForm.name.trim() || !editForm.email.trim() || !editForm.profileId) {
+      setActionError('Preencha nome, e-mail e perfil.')
+      return
+    }
+    if (!isAdminProfile(editForm.profileId) && !editForm.companyId) {
+      setActionError('Empresa é obrigatória para este perfil.')
+      return
+    }
+
+    setActionError('')
+    setBusyId(userId)
+    try {
+      const payload = {
+        name: editForm.name.trim(),
+        email: editForm.email.trim(),
+        profileId: Number(editForm.profileId),
+        companyId: editForm.companyId ? Number(editForm.companyId) : null,
+      }
+      if (editForm.password.trim()) {
+        payload.password = editForm.password.trim()
+      }
+      await updateUser(userId, payload)
+      cancelEditing()
+      await loadAll()
+    } catch (err) {
+      setActionError(err.message || 'Não foi possível atualizar o usuário.')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const handleDeactivate = async (user) => {
+    if (!window.confirm(`Desativar o usuário "${user.name}"?`)) {
+      return
+    }
+    setActionError('')
+    setBusyId(user.id)
+    try {
+      await deactivateUser(user.id)
+      await loadAll()
+    } catch (err) {
+      setActionError(err.message || 'Não foi possível desativar o usuário.')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const handleReactivate = async (user) => {
+    setActionError('')
+    setBusyId(user.id)
+    try {
+      await reactivateUser(user.id)
+      await loadAll()
+    } catch (err) {
+      setActionError(err.message || 'Não foi possível reativar o usuário.')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  return (
+    <div className="page-content">
+      <h2>Usuários</h2>
+      <p className="page-description">Cadastre e administre os usuários do Taurus.</p>
+
+      <div className="connection-form">
+        <form onSubmit={handleSubmit}>
+          <div className="form-group">
+            <label htmlFor="user-name">Nome</label>
+            <input
+              type="text"
+              id="user-name"
+              name="name"
+              value={form.name}
+              onChange={handleFormChange}
+              placeholder="Nome do usuário"
+              disabled={isSubmitting}
+            />
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="user-email">E-mail</label>
+            <input
+              type="email"
+              id="user-email"
+              name="email"
+              value={form.email}
+              onChange={handleFormChange}
+              placeholder="usuario@empresa.com"
+              disabled={isSubmitting}
+            />
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="user-profile">Perfil</label>
+            <select
+              id="user-profile"
+              name="profileId"
+              value={form.profileId}
+              onChange={handleFormChange}
+              disabled={isSubmitting}
+            >
+              <option value="">Selecione...</option>
+              {profiles.map((profile) => (
+                <option key={profile.id} value={profile.id}>
+                  {profile.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="user-company">Empresa</label>
+            <select
+              id="user-company"
+              name="companyId"
+              value={form.companyId}
+              onChange={handleFormChange}
+              disabled={isSubmitting || isAdminProfile(form.profileId)}
+            >
+              <option value="">
+                {isAdminProfile(form.profileId) ? 'Não aplicável' : 'Selecione...'}
+              </option>
+              {companies.map((company) => (
+                <option key={company.id} value={company.id}>
+                  {company.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="user-password">Senha</label>
+            <input
+              type="password"
+              id="user-password"
+              name="password"
+              value={form.password}
+              onChange={handleFormChange}
+              placeholder="Senha"
+              disabled={isSubmitting}
+            />
+          </div>
+
+          {formError && (
+            <div className="test-status error">
+              <p>{formError}</p>
+            </div>
+          )}
+
+          <button className="btn-test" type="submit" disabled={isSubmitting}>
+            {isSubmitting ? 'Salvando...' : 'Adicionar usuário'}
+          </button>
+        </form>
+      </div>
+
+      {loadError && (
+        <div className="test-status error">
+          <p>{loadError}</p>
+        </div>
+      )}
+
+      {actionError && (
+        <div className="test-status error">
+          <p>{actionError}</p>
+        </div>
+      )}
+
+      {isLoading ? (
+        <div className="empty-state">
+          <p>Carregando usuários...</p>
+        </div>
+      ) : users.length === 0 ? (
+        !loadError && (
+          <div className="empty-state">
+            <p>Nenhum usuário cadastrado.</p>
+          </div>
+        )
+      ) : (
+        <div className="slaves-container">
+          <table className="slaves-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Nome</th>
+                <th>E-mail</th>
+                <th>Perfil</th>
+                <th>Empresa</th>
+                <th>Status</th>
+                <th>Ações</th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map((user) => (
+                <tr key={user.id}>
+                  <td>{user.id}</td>
+                  {editingId === user.id ? (
+                    <>
+                      <td>
+                        <input
+                          type="text"
+                          name="name"
+                          value={editForm.name}
+                          onChange={handleEditChange}
+                          disabled={busyId === user.id}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="email"
+                          name="email"
+                          value={editForm.email}
+                          onChange={handleEditChange}
+                          disabled={busyId === user.id}
+                        />
+                      </td>
+                      <td>
+                        <select
+                          name="profileId"
+                          value={editForm.profileId}
+                          onChange={handleEditChange}
+                          disabled={busyId === user.id}
+                        >
+                          {profiles.map((profile) => (
+                            <option key={profile.id} value={profile.id}>
+                              {profile.name}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <select
+                          name="companyId"
+                          value={editForm.companyId}
+                          onChange={handleEditChange}
+                          disabled={busyId === user.id || isAdminProfile(editForm.profileId)}
+                        >
+                          <option value="">
+                            {isAdminProfile(editForm.profileId) ? 'Não aplicável' : 'Selecione...'}
+                          </option>
+                          {companies.map((company) => (
+                            <option key={company.id} value={company.id}>
+                              {company.name}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <span className={`status-badge ${user.active ? 'active' : 'inactive'}`}>
+                          {user.active ? 'Ativo' : 'Inativo'}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="table-actions">
+                          <input
+                            type="password"
+                            name="password"
+                            value={editForm.password}
+                            onChange={handleEditChange}
+                            placeholder="Nova senha (opcional)"
+                            disabled={busyId === user.id}
+                          />
+                          <button
+                            className="btn-small"
+                            onClick={() => handleSaveEdit(user.id)}
+                            disabled={busyId === user.id}
+                          >
+                            Salvar
+                          </button>
+                          <button
+                            className="btn-small"
+                            onClick={cancelEditing}
+                            disabled={busyId === user.id}
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td>{user.name}</td>
+                      <td>{user.email}</td>
+                      <td>{profileName(user.profile_id)}</td>
+                      <td>{companyName(user.company_id)}</td>
+                      <td>
+                        <span className={`status-badge ${user.active ? 'active' : 'inactive'}`}>
+                          {user.active ? 'Ativo' : 'Inativo'}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="table-actions">
+                          <button
+                            className="btn-small"
+                            onClick={() => startEditing(user)}
+                            disabled={busyId === user.id}
+                          >
+                            Editar
+                          </button>
+                          {user.active ? (
+                            <button
+                              className="btn-small"
+                              onClick={() => handleDeactivate(user)}
+                              disabled={busyId === user.id}
+                            >
+                              Desativar
+                            </button>
+                          ) : (
+                            <button
+                              className="btn-small"
+                              onClick={() => handleReactivate(user)}
+                              disabled={busyId === user.id}
+                            >
+                              Reativar
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -686,6 +1130,12 @@ function App() {
             >
               Empresas
             </button>
+            <button
+              className={`nav-item ${currentPage === 'users' ? 'active' : ''}`}
+              onClick={() => handlePageChange('users')}
+            >
+              Usuários
+            </button>
           </nav>
         </aside>
 
@@ -697,6 +1147,7 @@ function App() {
             <ConnectionPage isTestActive={mqttTestSession.isOpen} onStartTest={startMqttTest} />
           )}
           {currentPage === 'companies' && <CompaniesPage />}
+          {currentPage === 'users' && <UsersPage />}
         </main>
       </div>
 

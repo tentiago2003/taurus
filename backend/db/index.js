@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { DatabaseSync } = require('node:sqlite');
 
-const DB_PATH = path.join(__dirname, '..', '..', 'data', 'taurus.db');
+const DB_PATH = process.env.TAURUS_DB_PATH || path.join(__dirname, '..', '..', 'data', 'taurus.db');
 const SCHEMA_PATH = path.join(__dirname, 'schema.sql');
 
 const DEFAULT_PROFILES = [

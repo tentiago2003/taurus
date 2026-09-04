@@ -49,3 +49,33 @@ export function reactivateCompany(id) {
 export function deleteCompany(id) {
   return request(`/companies/${id}`, { method: 'DELETE' })
 }
+
+export function fetchProfiles() {
+  return request('/profiles')
+}
+
+export function fetchUsers() {
+  return request('/users')
+}
+
+export function createUser(data) {
+  return request('/users', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export function updateUser(id, data) {
+  return request(`/users/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}
+
+export function deactivateUser(id) {
+  return request(`/users/${id}/deactivate`, { method: 'POST' })
+}
+
+export function reactivateUser(id) {
+  return request(`/users/${id}/reactivate`, { method: 'POST' })
+}

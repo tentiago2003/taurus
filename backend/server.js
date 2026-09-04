@@ -5,8 +5,10 @@ const { WebSocketServer } = require('ws');
 const { createMqttConnection, startMqtt } = require('./mqtt/client');
 const { initDatabase } = require('./db');
 const { handleApiRequest } = require('./http/api');
+const usersService = require('./services/users.service');
 
 initDatabase();
+usersService.bootstrapAdmin();
 
 const port = Number(process.env.PORT) || 3000;
 const distPath = path.join(__dirname, '..', 'frontend', 'dist');
