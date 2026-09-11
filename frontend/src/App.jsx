@@ -17,12 +17,25 @@ import {
   logout,
 } from './api'
 
-const APP_VERSION = '0.1.0'
 const DEFAULT_MQTT_HOST = 'broker.hivemq.com'
 const DEFAULT_MQTT_PORT = '1883'
 const DEFAULT_MQTT_USER = 'CTa_Mqtt'
 const DEFAULT_MQTT_PASS = 'Senha_cta'
 const DEFAULT_MQTT_TOPICS = ['P2P-IoT/G001/LoRa1', 'P2P-IoT/G001/LoRa2', 'P2P-IoT/G001/LoRa3', 'P2P-IoT/G001/LoRa4']
+
+const formatBuildTime = (isoString) => {
+  try {
+    const date = new Date(isoString)
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    const hours = String(date.getHours()).padStart(2, '0')
+    const minutes = String(date.getMinutes()).padStart(2, '0')
+    return `${year}-${month}-${day} ${hours}:${minutes}`
+  } catch {
+    return 'N/A'
+  }
+}
 
 function LoginPage({ onLogin }) {
   const [email, setEmail] = useState('')
@@ -978,6 +991,33 @@ function MqttTestModal({ session, onClose }) {
   )
 }
 
+function AboutPage() {
+  return (
+    <div className="page-content">
+      <h2>Ajuda / Sobre</h2>
+      <p className="page-description">Informações básicas sobre o Taurus.</p>
+
+      <section className="about-card">
+        <div className="about-brand">Taurus</div>
+        <div className="about-version">Versão {__APP_VERSION__}</div>
+        <div className="about-build">Build {formatBuildTime(__BUILD_TIME__)}</div>
+        <p>
+          Plataforma de monitoramento e gerenciamento de dispositivos IoT.
+        </p>
+      </section>
+
+      <section className="help-card">
+        <h3>Ajuda rápida</h3>
+        <ul>
+          <li><strong>Conexão:</strong> teste a comunicação com o broker MQTT.</li>
+          <li><strong>Empresas:</strong> cadastre e administre as empresas.</li>
+          <li><strong>Usuários:</strong> cadastre usuários e defina seu perfil e empresa.</li>
+        </ul>
+      </section>
+    </div>
+  )
+}
+
 function App() {
   const [currentUser, setCurrentUser] = useState(null)
   const [authLoading, setAuthLoading] = useState(true)
@@ -1132,20 +1172,6 @@ function App() {
     setMqttTestSession({ isOpen: false, status: 'connecting', message: '', slaves: {} })
   }
 
-  const formatBuildTime = (isoString) => {
-    try {
-      const date = new Date(isoString)
-      const year = date.getFullYear()
-      const month = String(date.getMonth() + 1).padStart(2, '0')
-      const day = String(date.getDate()).padStart(2, '0')
-      const hours = String(date.getHours()).padStart(2, '0')
-      const minutes = String(date.getMinutes()).padStart(2, '0')
-      return `${year}-${month}-${day} ${hours}:${minutes}`
-    } catch {
-      return 'N/A'
-    }
-  }
-
   const closeSidebarOnMobile = () => {
     if (window.innerWidth < 768) {
       setSidebarOpen(false)
@@ -1234,6 +1260,12 @@ function App() {
             >
               Usuários
             </button>
+            <button
+              className={`nav-item ${currentPage === 'about' ? 'active' : ''}`}
+              onClick={() => handlePageChange('about')}
+            >
+              Ajuda / Sobre
+            </button>
           </nav>
         </aside>
 
@@ -1246,6 +1278,7 @@ function App() {
           )}
           {currentPage === 'companies' && <CompaniesPage />}
           {currentPage === 'users' && <UsersPage />}
+          {currentPage === 'about' && <AboutPage />}
         </main>
       </div>
 
@@ -1254,7 +1287,7 @@ function App() {
       <footer className="app-footer">
         <div className="footer-content">
           <span className="footer-brand">Taurus</span>
-          <span className="footer-version">v{APP_VERSION}</span>
+          <span className="footer-version">v{__APP_VERSION__}</span>
           <span className="footer-build">Build {formatBuildTime(__BUILD_TIME__)}</span>
         </div>
       </footer>
