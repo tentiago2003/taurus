@@ -8,6 +8,12 @@ import {
   deleteCompany,
   fetchProfiles,
   fetchUsers,
+  fetchConnections,
+  createConnection,
+  updateConnection,
+  deactivateConnection,
+  reactivateConnection,
+  deleteConnection,
   createUser,
   updateUser,
   deactivateUser,
@@ -16,12 +22,6 @@ import {
   fetchCurrentUser,
   logout,
 } from './api'
-
-const DEFAULT_MQTT_HOST = 'broker.hivemq.com'
-const DEFAULT_MQTT_PORT = '1883'
-const DEFAULT_MQTT_USER = 'CTa_Mqtt'
-const DEFAULT_MQTT_PASS = 'Senha_cta'
-const DEFAULT_MQTT_TOPICS = ['P2P-IoT/G001/LoRa1', 'P2P-IoT/G001/LoRa2', 'P2P-IoT/G001/LoRa3', 'P2P-IoT/G001/LoRa4']
 
 const formatBuildTime = (isoString) => {
   try {
@@ -818,137 +818,255 @@ function UsersPage() {
 }
 
 function ConnectionPage({ isTestActive, onStartTest }) {
-  const [formData, setFormData] = useState({
-    host: DEFAULT_MQTT_HOST,
-    port: DEFAULT_MQTT_PORT,
-    user: DEFAULT_MQTT_USER,
-    pass: DEFAULT_MQTT_PASS,
-  })
-  const [topics, setTopics] = useState(DEFAULT_MQTT_TOPICS)
+  const emptyTopic = () => ({ id: null, name: '', topic: '', samplingIntervalSeconds: 600, storeHistory: true, active: true })
+  const emptyForm = () => ({ id: null, companyId: '', name: '', type: 'MQTT', host: '', port: '', username: '', password: '', topics: [emptyTopic()] })
+  const [connections, setConnections] = useState([])
+  const [companies, setCompanies] = useState([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [actionError, setActionError] = useState('')
+  const [editing, setEditing] = useState(false)
+  const [form, setForm] = useState(emptyForm)
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
-  const handleInputChange = (e) => {
-    const { name, value } = e.target
-    setFormData((prev) => ({
+  const loadAll = async () => {
+    setIsLoading(true)
+    setLoadError('')
+    try {
+      const [connectionData, companyData] = await Promise.all([fetchConnections(), fetchCompanies()])
+      setConnections(connectionData)
+      setCompanies(companyData)
+    } catch (err) {
+      setLoadError(err.message || 'Não foi possível carregar as conexões.')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadAll()
+  }, [])
+
+  const openNew = () => {
+    setActionError('')
+    setForm(emptyForm())
+    setEditing(true)
+  }
+
+  const openEdit = (connection) => {
+    const configuration = connection.configuration || {}
+    setActionError('')
+    setForm({
+      id: connection.id,
+      companyId: String(connection.company_id),
+      name: connection.name,
+      type: connection.type,
+      host: configuration.host || '',
+      port: configuration.port ? String(configuration.port) : '',
+      username: configuration.username || '',
+      password: configuration.password || '',
+      topics: (connection.dataSources || []).map((source) => ({
+        id: source.id,
+        name: source.name,
+        topic: source.topic || '',
+        samplingIntervalSeconds: source.sampling_interval_seconds || 600,
+        storeHistory: Boolean(source.store_history),
+        active: Boolean(source.active),
+      })),
+    })
+    setEditing(true)
+  }
+
+  const closeEditor = () => {
+    if (isSubmitting) return
+    setActionError('')
+    setEditing(false)
+    setForm(emptyForm())
+  }
+
+  const updateForm = (field, value) => setForm((prev) => ({ ...prev, [field]: value }))
+
+  const updateTopic = (index, field, value) => {
+    setForm((prev) => ({
       ...prev,
-      [name]: value,
+      topics: prev.topics.map((topic, i) => i === index ? { ...topic, [field]: value } : topic),
     }))
   }
 
-  const handleTopicChange = (index, value) => {
-    setTopics((prev) => prev.map((topic, i) => (i === index ? value : topic)))
-  }
+  const addTopic = () => setForm((prev) => ({ ...prev, topics: [...prev.topics, emptyTopic()] }))
+  const removeTopic = (index) => setForm((prev) => ({ ...prev, topics: prev.topics.filter((_, i) => i !== index) }))
 
-  const handleAddTopic = () => {
-    setTopics((prev) => [...prev, ''])
-  }
-
-  const handleRemoveTopic = (index) => {
-    setTopics((prev) => prev.filter((_, i) => i !== index))
-  }
-
-  const handleTestConnection = () => {
-    const topicsArray = topics
-      .map(t => t.trim())
-      .filter(t => t.length > 0)
-
+  const handleTest = () => {
+    const topics = form.topics.map((item) => item.topic.trim()).filter(Boolean)
+    if (!form.host.trim() || !form.port || topics.length === 0) {
+      setActionError('Informe host, porta e pelo menos um tópico MQTT antes de testar a conexão.')
+      return
+    }
+    setActionError('')
     onStartTest({
-      host: formData.host,
-      port: formData.port,
-      username: formData.user,
-      password: formData.pass,
-      topics: topicsArray,
+      host: form.host.trim(),
+      port: form.port,
+      username: form.username.trim(),
+      password: form.password,
+      topics,
     })
   }
 
-  return (
-    <div className="page-content">
-      <h2>Configuração da conexão MQTT</h2>
+  const handleSave = async () => {
+    if (!form.companyId || !form.name.trim() || !form.host.trim() || !form.port) {
+      setActionError('Preencha empresa, nome, host e porta.')
+      return
+    }
+    if (form.topics.length === 0) {
+      setActionError('Informe pelo menos um tópico MQTT.')
+      return
+    }
+    if (form.topics.some((topic) => !topic.name.trim() || !topic.topic.trim())) {
+      setActionError('Preencha o nome e o tópico de todas as fontes.')
+      return
+    }
 
-      <div className="connection-form">
-        <div className="form-group">
-          <label htmlFor="host">Host</label>
-          <input
-            type="text"
-            id="host"
-            name="host"
-            value={formData.host}
-            onChange={handleInputChange}
-            placeholder="localhost"
-          />
-        </div>
+    setActionError('')
+    setIsSubmitting(true)
+    try {
+      const payload = {
+        companyId: Number(form.companyId),
+        name: form.name.trim(),
+        type: form.type,
+        configuration: {
+          host: form.host.trim(),
+          port: Number(form.port),
+          username: form.username.trim(),
+          password: form.password,
+        },
+        topics: form.topics.map((topic) => ({
+          id: topic.id,
+          name: topic.name.trim(),
+          topic: topic.topic.trim(),
+          samplingIntervalSeconds: Number(topic.samplingIntervalSeconds) || 600,
+          storeHistory: Boolean(topic.storeHistory),
+          active: Boolean(topic.active),
+        })),
+      }
+      if (form.id) await updateConnection(form.id, payload)
+      else await createConnection(payload)
+      setEditing(false)
+      setForm(emptyForm())
+      await loadAll()
+    } catch (err) {
+      setActionError(err.message || 'Não foi possível salvar a conexão.')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
 
-        <div className="form-group">
-          <label htmlFor="port">Porta</label>
-          <input
-            type="text"
-            id="port"
-            name="port"
-            value={formData.port}
-            onChange={handleInputChange}
-            placeholder="1883"
-          />
-        </div>
+  const handleDeactivate = async (connection) => {
+    if (!window.confirm(`Desativar a conexão "${connection.name}"?`)) return
+    try {
+      await deactivateConnection(connection.id)
+      await loadAll()
+    } catch (err) { setActionError(err.message || 'Não foi possível desativar a conexão.') }
+  }
 
-        <div className="form-group">
-          <label htmlFor="user">Usuário</label>
-          <input
-            type="text"
-            id="user"
-            name="user"
-            value={formData.user}
-            onChange={handleInputChange}
-            placeholder="user"
-          />
-        </div>
+  const handleReactivate = async (connection) => {
+    try {
+      await reactivateConnection(connection.id)
+      await loadAll()
+    } catch (err) { setActionError(err.message || 'Não foi possível reativar a conexão.') }
+  }
 
-        <div className="form-group">
-          <label htmlFor="pass">Senha</label>
-          <input
-            type="password"
-            id="pass"
-            name="pass"
-            value={formData.pass}
-            onChange={handleInputChange}
-            placeholder="pass"
-          />
-        </div>
+  const handleDelete = async (connection) => {
+    if (!window.confirm(`Excluir definitivamente a conexão "${connection.name}"?`)) return
+    try {
+      await deleteConnection(connection.id)
+      await loadAll()
+    } catch (err) { setActionError(err.message || 'Não foi possível excluir a conexão.') }
+  }
 
-        <div className="form-group">
-          <label>Tópicos MQTT</label>
-          <div className="topics-list">
-            {topics.map((topic, index) => (
-              <div className="topic-row" key={index}>
-                <input
-                  type="text"
-                  value={topic}
-                  onChange={(e) => handleTopicChange(index, e.target.value)}
-                  placeholder="ex: P2P-IoT/G001/LoRa1"
-                />
-                <button
-                  type="button"
-                  className="btn-remove-topic"
-                  onClick={() => handleRemoveTopic(index)}
-                  aria-label="Remover tópico"
-                >
-                  −
-                </button>
-              </div>
-            ))}
+  if (editing) {
+    return (
+      <div className="page-content connection-editor-page">
+        <div className="connection-editor-header">
+          <div>
+            <button className="btn-small connection-back-button" onClick={closeEditor} disabled={isSubmitting}>← Voltar para conexões</button>
+            <h2>{form.id ? 'Editar conexão' : 'Nova conexão'}</h2>
+            <p className="page-description">Configure a conexão MQTT e suas fontes de dados.</p>
           </div>
-          <button type="button" className="btn-add-topic" onClick={handleAddTopic}>
-            + Adicionar tópico
-          </button>
         </div>
 
-        <button className="btn-test" onClick={handleTestConnection} disabled={isTestActive}>
-          Testar conexão
-        </button>
+        {actionError && <div className="test-status error"><p>{actionError}</p></div>}
+
+        <section className="connection-section">
+          <div className="connection-section-title"><span>1</span><div><h3>Dados da conexão</h3><p>Parâmetros utilizados para conectar ao broker MQTT.</p></div></div>
+          <div className="connection-grid">
+            <div className="form-group"><label>Empresa</label><select value={form.companyId} onChange={(e) => updateForm('companyId', e.target.value)} disabled={isSubmitting}><option value="">Selecione...</option>{companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}</select></div>
+            <div className="form-group"><label>Tipo</label><select value={form.type} disabled><option value="MQTT">MQTT</option></select></div>
+            <div className="form-group"><label>Nome da conexão</label><input value={form.name} onChange={(e) => updateForm('name', e.target.value)} disabled={isSubmitting} placeholder="Ex.: MQTT Produção" /></div>
+            <div className="form-group"><label>Host</label><input value={form.host} onChange={(e) => updateForm('host', e.target.value)} disabled={isSubmitting} /></div>
+            <div className="form-group"><label>Porta</label><input type="number" value={form.port} onChange={(e) => updateForm('port', e.target.value)} disabled={isSubmitting} /></div>
+            <div className="form-group"><label>Usuário</label><input value={form.username} onChange={(e) => updateForm('username', e.target.value)} disabled={isSubmitting} /></div>
+            <div className="form-group"><label>Senha</label><input type="password" value={form.password} onChange={(e) => updateForm('password', e.target.value)} disabled={isSubmitting} /></div>
+          </div>
+        </section>
+
+        <section className="connection-section">
+          <div className="connection-section-head"><div className="connection-section-title"><span>2</span><div><h3>Tópicos MQTT</h3><p>Os tópicos fazem parte da configuração e do teste da conexão.</p></div></div><button className="btn-add-topic" onClick={addTopic} disabled={isSubmitting}>+ Adicionar tópico</button></div>
+          <div className="topics-edit-list">{form.topics.map((topic, index) => <div className="topic-edit-card" key={topic.id || `new-${index}`}>
+            <div className="topic-edit-grid"><div className="form-group"><label>Nome da fonte</label><input value={topic.name} onChange={(e) => updateTopic(index, 'name', e.target.value)} /></div><div className="form-group"><label>Tópico MQTT</label><input value={topic.topic} onChange={(e) => updateTopic(index, 'topic', e.target.value)} /></div><div className="form-group"><label>Intervalo (s)</label><input type="number" min="1" value={topic.samplingIntervalSeconds} onChange={(e) => updateTopic(index, 'samplingIntervalSeconds', e.target.value)} /></div><div className="form-group"><label>Histórico</label><select value={topic.storeHistory ? '1' : '0'} onChange={(e) => updateTopic(index, 'storeHistory', e.target.value === '1')}><option value="1">Sim</option><option value="0">Não</option></select></div></div>
+            <button className="btn-remove-topic" onClick={() => removeTopic(index)} disabled={isSubmitting} aria-label="Remover tópico">−</button>
+          </div>)}</div>
+        </section>
+
+        <section className="connection-section">
+          <div className="connection-section-head"><div className="connection-section-title"><span>3</span><div><h3>Teste da conexão</h3><p>O teste utiliza os dados da conexão e os tópicos cadastrados.</p></div></div><button className="btn-test" onClick={handleTest} disabled={isTestActive || isSubmitting}>{isTestActive ? 'Teste em andamento...' : 'Testar conexão'}</button></div>
+        </section>
+
+        <div className="connection-modal-note"><strong>O teste é temporário.</strong> Ele conecta ao broker, assina os tópicos e aguarda dados. Ele não salva nem ativa a conexão permanente.</div>
+        <div className="connection-editor-footer"><button className="btn-small" onClick={closeEditor} disabled={isSubmitting}>Cancelar</button><button className="btn-test" onClick={handleSave} disabled={isSubmitting}>{isSubmitting ? 'Salvando...' : 'Salvar conexão'}</button></div>
       </div>
+    )
+  }
+
+  return (
+    <div className="page-content connections-page">
+      <div className="connections-header">
+        <div><h2>Conexões</h2><p className="page-description">Gerencie as conexões externas utilizadas pelo Taurus.</p></div>
+        <button className="btn-test" onClick={openNew}>+ Nova conexão</button>
+      </div>
+
+      {(loadError || actionError) && <div className="test-status error"><p>{loadError || actionError}</p></div>}
+
+      {isLoading ? <div className="empty-state"><p>Carregando conexões...</p></div> : connections.length === 0 ? (
+        !loadError && <div className="empty-state"><p>Nenhuma conexão cadastrada.</p></div>
+      ) : (
+        <div className="slaves-container connections-table-container">
+          <table className="slaves-table connections-table"><thead><tr><th>Nome</th><th>Empresa</th><th>Tipo</th><th>Status</th><th>Tópicos</th><th>Ações</th></tr></thead>
+          <tbody>{connections.map((connection) => <tr key={connection.id}>
+            <td>{connection.name}</td><td>{companies.find((c) => c.id === connection.company_id)?.name || connection.company_id}</td><td>{connection.type}</td>
+            <td><span className={`status-badge ${connection.active ? 'active' : 'inactive'}`}>{connection.active ? 'Ativa' : 'Inativa'}</span></td>
+            <td>{connection.dataSources?.length || 0}</td>
+            <td><div className="table-actions">
+              <button className="btn-small" onClick={() => openEdit(connection)}>Editar</button>
+              {connection.active ? <button className="btn-small" onClick={() => handleDeactivate(connection)}>Desativar</button> : <button className="btn-small" onClick={() => handleReactivate(connection)}>Reativar</button>}
+              <button className="btn-small danger" onClick={() => handleDelete(connection)}>Excluir</button>
+            </div></td>
+          </tr>)}</tbody></table>
+        </div>
+      )}
     </div>
   )
 }
 
+
 function MqttTestModal({ session, onClose }) {
+  const logRef = useRef(null)
+
+  useEffect(() => {
+    if (session.status === 'connected' && logRef.current) {
+      logRef.current.scrollTop = logRef.current.scrollHeight
+    }
+  }, [session.status, session.messages?.length])
+
   const statusContent = {
     connecting: ['Testando conexão...', 'Conectando ao broker MQTT...'],
     connected: ['Conectado', 'Recebendo dados...'],
@@ -964,25 +1082,36 @@ function MqttTestModal({ session, onClose }) {
         <p className={`mqtt-test-description ${session.status}`}>{description}</p>
 
         {session.status === 'connected' && (
-          <div className="slaves-container">
-            <table className="slaves-table">
-              <thead>
-                <tr><th>Slave</th><th>T1</th><th>T2</th><th>Última atualização</th></tr>
-              </thead>
-              <tbody>
-                {slaves.length === 0 ? (
-                  <tr><td className="empty" colSpan="4">Aguardando mensagens MQTT...</td></tr>
-                ) : slaves.map(([slave, data]) => (
-                  <tr key={slave}>
-                    <td>{slave}</td>
-                    <td className="value">{data.t1}</td>
-                    <td className="value">{data.t2}</td>
-                    <td>{data.ts}</td>
-                  </tr>
+          <>
+            <div className="mqtt-test-summary">
+              <strong>Conexão estabelecida.</strong> Os tópicos foram assinados. Aguardando e exibindo as mensagens recebidas.
+            </div>
+            <div className="mqtt-test-live">
+              <div className="mqtt-test-live-title">Mensagens recebidas</div>
+              <div className="mqtt-test-live-log" ref={logRef}>
+                {session.messages?.length === 0 ? (
+                  <div className="mqtt-test-live-empty">Conectado. Aguardando mensagens MQTT...</div>
+                ) : session.messages.map((data, index) => (
+                  <div className="mqtt-test-live-line" key={`${data.ts}-${index}`}>
+                    <span className="mqtt-test-live-time">{data.ts}</span>{' '}
+                    <span className="mqtt-test-live-topic">{data.topic}</span>{' '}
+                    <span>→ Slave {data.slave} | T1: {data.t1} | T2: {data.t2}</span>
+                  </div>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </div>
+            </div>
+            <div className="mqtt-test-current">
+              <strong>Último valor por Slave</strong>
+              <div className="slaves-container">
+                <table className="slaves-table">
+                  <thead><tr><th>Slave</th><th>T1</th><th>T2</th><th>Última atualização</th></tr></thead>
+                  <tbody>{slaves.map(([slave, data]) => (
+                    <tr key={slave}><td>{slave}</td><td className="value">{data.t1}</td><td className="value">{data.t2}</td><td>{data.ts}</td></tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            </div>
+          </>
         )}
 
         <button className="btn-close-test" onClick={onClose}>Fechar teste</button>
@@ -1026,11 +1155,13 @@ function App() {
   const [currentPage, setCurrentPage] = useState('home')
   const [isConnected, setIsConnected] = useState(false)
   const socketRef = useRef(null)
+  const mqttTestTimerRef = useRef(null)
   const [mqttTestSession, setMqttTestSession] = useState({
     isOpen: false,
     status: 'connecting',
     message: '',
     slaves: {},
+    messages: [],
   })
   const [slaves, setSlaves] = useState({
     1: { t1: null, t2: null, ts: null },
@@ -1092,6 +1223,12 @@ function App() {
         }
 
         if (payload && payload.type === 'mqtt_test_status') {
+          if (payload.status === 'connected' || payload.status === 'error' || payload.status === 'disconnected') {
+            if (mqttTestTimerRef.current) {
+              clearTimeout(mqttTestTimerRef.current)
+              mqttTestTimerRef.current = null
+            }
+          }
           setMqttTestSession((previous) => ({
             ...previous,
             isOpen: payload.status !== 'disconnected',
@@ -1109,6 +1246,10 @@ function App() {
               ...previous.slaves,
               [slave]: { t1, t2, ts },
             },
+            messages: [
+              ...previous.messages,
+              { topic: payload.topic || 'Tópico MQTT', slave, t1, t2, ts },
+            ].slice(-20),
           }))
           return
         }
@@ -1151,7 +1292,14 @@ function App() {
   }, [])
 
   const startMqttTest = (config) => {
-    setMqttTestSession({ isOpen: true, status: 'connecting', message: '', slaves: {} })
+    if (mqttTestTimerRef.current) {
+      clearTimeout(mqttTestTimerRef.current)
+      mqttTestTimerRef.current = null
+    }
+
+    // A modal de teste abre imediatamente. O cadastro permanece por baixo dela.
+    setMqttTestSession({ isOpen: true, status: 'connecting', message: '', slaves: {}, messages: [] })
+
     const socket = socketRef.current
     if (!socket || socket.readyState !== WebSocket.OPEN) {
       setMqttTestSession((previous) => ({
@@ -1161,16 +1309,43 @@ function App() {
       }))
       return
     }
+
     socket.send(JSON.stringify({ type: 'mqtt_test_start', config }))
+
+    // Fallback no navegador para evitar que o teste fique indefinidamente em "Conectando".
+    // A modal permanece aberta para o usuário ler a falha e fechá-la manualmente.
+    mqttTestTimerRef.current = setTimeout(() => {
+      mqttTestTimerRef.current = null
+      setMqttTestSession((previous) => {
+        if (!previous.isOpen || previous.status !== 'connecting') {
+          return previous
+        }
+        return {
+          ...previous,
+          status: 'error',
+          message: 'Tempo limite excedido. Não foi possível conectar ao broker MQTT.',
+        }
+      })
+    }, 10000)
   }
 
   const stopMqttTest = () => {
+    if (mqttTestTimerRef.current) {
+      clearTimeout(mqttTestTimerRef.current)
+      mqttTestTimerRef.current = null
+    }
     const socket = socketRef.current
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({ type: 'mqtt_test_stop' }))
     }
-    setMqttTestSession({ isOpen: false, status: 'connecting', message: '', slaves: {} })
+    setMqttTestSession({ isOpen: false, status: 'connecting', message: '', slaves: {}, messages: [] })
   }
+
+  useEffect(() => () => {
+    if (mqttTestTimerRef.current) {
+      clearTimeout(mqttTestTimerRef.current)
+    }
+  }, [])
 
   const closeSidebarOnMobile = () => {
     if (window.innerWidth < 768) {

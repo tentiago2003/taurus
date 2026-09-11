@@ -104,6 +104,7 @@ wss.on('connection', (ws) => {
   }));
 
   let testConnection;
+  let testTimeout;
 
   function sendTestStatus(status, message) {
     if (ws.readyState !== ws.OPEN) {
@@ -118,6 +119,11 @@ wss.on('connection', (ws) => {
   }
 
   function stopMqttTest(notify = true) {
+    if (testTimeout) {
+      clearTimeout(testTimeout);
+      testTimeout = undefined;
+    }
+
     if (!testConnection) {
       return;
     }
@@ -160,28 +166,53 @@ wss.on('connection', (ws) => {
       port: mqttPort,
       username: config.username,
       password: config.password,
+      connectTimeout: 10000,
     });
     testConnection = connection;
+
+    testTimeout = setTimeout(() => {
+      if (testConnection !== connection) {
+        return;
+      }
+
+      sendTestStatus(
+        'error',
+        'Tempo limite excedido. Não foi possível concluir o teste MQTT. Verifique o broker, as credenciais, os tópicos e a rede.'
+      );
+      stopMqttTest(false);
+    }, 15000);
 
     connection
       .onConnect(async () => {
         try {
           await connection.subscribe(topics);
           if (testConnection === connection) {
+            if (testTimeout) {
+              clearTimeout(testTimeout);
+              testTimeout = undefined;
+            }
             sendTestStatus('connected');
           }
         } catch (error) {
           handleTestError(connection, error);
         }
       })
-      .onMessage((data) => {
+      .onMessage((data, topic) => {
         if (testConnection === connection && ws.readyState === ws.OPEN) {
-          ws.send(JSON.stringify({ type: 'mqtt_test_message', data }));
+          if (testTimeout) {
+            clearTimeout(testTimeout);
+            testTimeout = undefined;
+          }
+          ws.send(JSON.stringify({ type: 'mqtt_test_message', data, topic }));
         }
       })
       .onError((error) => handleTestError(connection, error));
 
-    connection.connect();
+    try {
+      connection.connect();
+    } catch (error) {
+      handleTestError(connection, error);
+    }
   }
 
   ws.on('message', (message) => {

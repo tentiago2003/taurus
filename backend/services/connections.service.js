@@ -1,22 +1,147 @@
 const repository = require('../db/repository');
 const { ApiError } = require('../http/errors');
-const { requireString, requireInt } = require('./validation');
+const { requireString, requireInt, optionalInt } = require('./validation');
+
+const SUPPORTED_TYPES = new Set(['MQTT']);
 
 function list() {
-  return repository.connections.list();
+  return repository.connections.list().map((connection) => ({
+    ...connection,
+    dataSources: repository.dataSources.listByConnection(connection.id),
+  }));
+}
+
+function normalizeConfiguration(payload = {}) {
+  return {
+    host: requireString(payload.host, 'host'),
+    port: requireInt(payload.port, 'port'),
+    username: payload.username?.trim() || '',
+    password: payload.password ?? '',
+  };
+}
+
+function normalizeTopics(topics) {
+  if (!Array.isArray(topics) || topics.length === 0) {
+    throw new ApiError(400, 'Informe pelo menos um tópico MQTT.');
+  }
+
+  const normalized = topics.map((topic, index) => ({
+    id: topic.id === undefined || topic.id === null || topic.id === '' ? null : requireInt(topic.id, `topics[${index}].id`),
+    name: requireString(topic.name, `topics[${index}].name`),
+    topic: requireString(topic.topic, `topics[${index}].topic`),
+    samplingIntervalSeconds: optionalInt(topic.samplingIntervalSeconds) ?? 600,
+    storeHistory: topic.storeHistory === undefined ? 1 : topic.storeHistory ? 1 : 0,
+    active: topic.active === undefined ? 1 : topic.active ? 1 : 0,
+  }));
+
+  const names = new Set();
+  const topicPaths = new Set();
+  for (const item of normalized) {
+    if (names.has(item.name)) {
+      throw new ApiError(400, `Nome de fonte duplicado: ${item.name}.`);
+    }
+    if (topicPaths.has(item.topic)) {
+      throw new ApiError(400, `Tópico duplicado: ${item.topic}.`);
+    }
+    names.add(item.name);
+    topicPaths.add(item.topic);
+  }
+
+  return normalized;
+}
+
+function validateType(type) {
+  if (!SUPPORTED_TYPES.has(type)) {
+    throw new ApiError(400, `Tipo de conexão não suportado: ${type}.`);
+  }
+}
+
+function ensureCompany(companyId) {
+  if (!repository.companies.findById(companyId)) {
+    throw new ApiError(400, 'Empresa informada não existe.');
+  }
+}
+
+function ensureExists(id) {
+  const connection = repository.connections.findById(id);
+  if (!connection) {
+    throw new ApiError(404, 'Conexão não encontrada.');
+  }
+  return connection;
+}
+
+function get(id) {
+  const connection = ensureExists(id);
+  return {
+    ...connection,
+    dataSources: repository.dataSources.listByConnection(id),
+  };
 }
 
 function create(payload = {}) {
   const companyId = requireInt(payload.companyId, 'companyId');
   const name = requireString(payload.name, 'name');
   const type = requireString(payload.type, 'type');
-  const configuration = payload.configuration ?? {};
+  validateType(type);
+  ensureCompany(companyId);
+  const configuration = normalizeConfiguration(payload.configuration || payload);
+  const topics = normalizeTopics(payload.topics);
 
-  if (!repository.companies.findById(companyId)) {
-    throw new ApiError(400, 'Empresa informada não existe.');
-  }
-
-  return repository.connections.create({ companyId, name, type, configuration });
+  return repository.connections.createWithDataSources({
+    companyId,
+    name,
+    type,
+    configuration,
+    dataSources: topics,
+    createdBy: payload.createdBy ?? null,
+  });
 }
 
-module.exports = { list, create };
+function update(id, payload = {}) {
+  ensureExists(id);
+  const companyId = requireInt(payload.companyId, 'companyId');
+  const name = requireString(payload.name, 'name');
+  const type = requireString(payload.type, 'type');
+  validateType(type);
+  ensureCompany(companyId);
+  const configuration = normalizeConfiguration(payload.configuration || payload);
+  const topics = normalizeTopics(payload.topics);
+
+  return repository.connections.updateWithDataSources({
+    id,
+    companyId,
+    name,
+    type,
+    configuration,
+    dataSources: topics,
+    updatedBy: payload.updatedBy ?? null,
+  });
+}
+
+function setActive(id, active) {
+  ensureExists(id);
+  return repository.connections.setActive({ id, active, updatedBy: null });
+}
+
+function deactivate(id) {
+  return setActive(id, 0);
+}
+
+function reactivate(id) {
+  return setActive(id, 1);
+}
+
+function remove(id) {
+  ensureExists(id);
+  repository.connections.remove(id);
+}
+
+module.exports = {
+  list,
+  get,
+  create,
+  update,
+  deactivate,
+  reactivate,
+  remove,
+};

@@ -484,7 +484,7 @@ body {
 .mqtt-test-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 200;
+  z-index: 2000;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -919,3 +919,102 @@ body {
     display: none;
   }
 }
+
+/* ============ CONNECTIONS CRUD ============ */
+.connections-page { max-width: 1200px; margin: 0 auto; }
+.connections-header { display:flex; justify-content:space-between; align-items:flex-start; gap:20px; margin-bottom:20px; }
+.connections-table-container { overflow-x:auto; }
+.connections-table { min-width:800px; }
+.connection-section { margin:18px 22px; padding:18px; border:1px solid #444; border-radius:8px; background:#2d2d2d; }
+.connection-section-title { display:flex; align-items:center; gap:11px; margin-bottom:16px; }
+.connection-section-title > span { width:28px; height:28px; border-radius:50%; display:grid; place-items:center; background:#d4af37; color:#161616; font-weight:700; }
+.connection-section-title h3 { margin:0; color:#eee; font-size:16px; }
+.connection-section-title p { margin:3px 0 0; color:#999; font-size:13px; }
+.connection-section-head { display:flex; align-items:center; justify-content:space-between; gap:15px; }
+.connection-section-head .connection-section-title { margin-bottom:0; }
+.connection-grid { display:grid; grid-template-columns:2fr 1fr 2fr; gap:12px; }
+.connection-grid .form-group { margin-bottom:8px; }
+.connection-grid .form-group label, .topic-edit-card .form-group label { text-transform:none; letter-spacing:0; color:#d4af37; }
+.connection-grid select, .connection-grid input, .topic-edit-card select, .topic-edit-card input { background:#1a1a1a; color:#e0e0e0; border:1px solid #444; }
+.topics-edit-list { display:flex; flex-direction:column; gap:10px; }
+.topic-edit-card { position:relative; display:flex; align-items:flex-end; gap:10px; padding:12px 44px 4px 12px; border:1px solid #444; border-radius:7px; background:#242424; }
+.topic-edit-grid { flex:1; display:grid; grid-template-columns:1.2fr 2fr .8fr .8fr; gap:10px; }
+.topic-edit-card .form-group { margin-bottom:8px; }
+.topic-edit-card .form-group input, .topic-edit-card .form-group select { width:100%; }
+.topic-edit-card .btn-remove-topic { position:absolute; right:10px; bottom:22px; }
+.connection-modal-note { margin:0 22px 18px; padding:11px 13px; border-radius:6px; background:#262626; color:#aaa; border:1px solid #3d3d3d; font-size:12px; }
+@media (max-width:900px) { .connection-grid, .topic-edit-grid { grid-template-columns:1fr 1fr; } }
+@media (max-width:650px) { .connections-header, .connection-section-head { flex-direction:column; align-items:stretch; } .connection-grid, .topic-edit-grid { grid-template-columns:1fr; } .topic-edit-card { padding-right:12px; } .topic-edit-card .btn-remove-topic { position:static; align-self:center; } }
+
+
+/* MQTT test details */
+.mqtt-test-summary {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px solid #4a6a43;
+  border-radius: 6px;
+  background: rgba(76, 175, 80, 0.08);
+  color: #b8dcb0;
+  font-size: 13px;
+}
+
+.mqtt-test-current {
+  margin-top: 18px;
+}
+
+.mqtt-test-current > strong {
+  display: block;
+  margin-bottom: 8px;
+  color: #d4af37;
+}
+
+
+.mqtt-test-live {
+  margin-top: 16px;
+}
+
+.mqtt-test-live-title {
+  margin-bottom: 8px;
+  color: #d4af37;
+  font-weight: 600;
+}
+
+.mqtt-test-live-log {
+  height: 190px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border: 1px solid #444;
+  border-radius: 6px;
+  background: #171717;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.mqtt-test-live-line {
+  padding: 3px 0;
+  color: #d0d0d0;
+  overflow-wrap: anywhere;
+}
+
+.mqtt-test-live-time {
+  color: #888;
+}
+
+.mqtt-test-live-topic {
+  color: #d4af37;
+}
+
+.mqtt-test-live-empty {
+  color: #777;
+  font-style: italic;
+}
+
+/* ============ CONNECTION EDITOR PAGE ============ */
+.connection-editor-page { max-width: 1200px; margin: 0 auto; }
+.connection-editor-header { margin-bottom: 20px; }
+.connection-editor-header h2 { margin: 12px 0 4px; }
+.connection-back-button { margin-bottom: 4px; }
+.connection-editor-page .connection-section { margin: 0 0 18px; }
+.connection-editor-page .connection-modal-note { margin: 0 0 18px; }
+.connection-editor-footer { display:flex; justify-content:flex-end; gap:10px; padding:16px 0 8px; margin-top:4px; border-top:1px solid #444; }

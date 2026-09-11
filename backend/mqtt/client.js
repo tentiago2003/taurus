@@ -58,7 +58,7 @@ function createMqttConnection(config) {
         const parsedPayload = parseMqttPayload(payload.toString());
         console.log(`Parsed message from ${topic}:`, parsedPayload);
         if (parsedPayload && typeof onMessage === 'function') {
-          onMessage(parsedPayload);
+          onMessage(parsedPayload, topic);
         }
       } catch (error) {
         console.error(`Error parsing message from ${topic}: ${error.message}`);

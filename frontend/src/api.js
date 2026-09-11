@@ -95,3 +95,37 @@ export function deactivateUser(id) {
 export function reactivateUser(id) {
   return request(`/users/${id}/reactivate`, { method: 'POST' })
 }
+
+export function fetchConnections() {
+  return request('/connections')
+}
+
+export function fetchConnection(id) {
+  return request(`/connections/${id}`)
+}
+
+export function createConnection(data) {
+  return request('/connections', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export function updateConnection(id, data) {
+  return request(`/connections/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}
+
+export function deactivateConnection(id) {
+  return request(`/connections/${id}/deactivate`, { method: 'POST' })
+}
+
+export function reactivateConnection(id) {
+  return request(`/connections/${id}/reactivate`, { method: 'POST' })
+}
+
+export function deleteConnection(id) {
+  return request(`/connections/${id}`, { method: 'DELETE' })
+}

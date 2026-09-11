@@ -241,6 +241,20 @@ const dataSources = {
       );
     return this.findById(result.lastInsertRowid);
   },
+  update({ id, name, type, topic = null, samplingIntervalSeconds = 600, storeHistory = 1, active = 1, updatedBy = null }) {
+    getDatabase()
+      .prepare(
+        `UPDATE data_sources
+         SET name = ?, type = ?, topic = ?, sampling_interval_seconds = ?, store_history = ?, active = ?,
+             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), updated_by = ?
+         WHERE id = ?`
+      )
+      .run(name, type, topic, samplingIntervalSeconds, storeHistory ? 1 : 0, active ? 1 : 0, updatedBy, id);
+    return this.findById(id);
+  },
+  remove(id) {
+    return getDatabase().prepare('DELETE FROM data_sources WHERE id = ?').run(id).changes > 0;
+  },
 };
 
 const connections = {
@@ -267,6 +281,111 @@ const connections = {
       )
       .run(companyId, name, type, JSON.stringify(configuration ?? {}), createdBy, createdBy);
     return this.findById(result.lastInsertRowid);
+  },
+  createWithDataSources({ companyId, name, type, configuration, dataSources: sources, createdBy = null }) {
+    const db = getDatabase();
+    db.exec('BEGIN');
+    try {
+      const result = db
+        .prepare(
+          `INSERT INTO connections (company_id, name, type, configuration, created_by, updated_by)
+           VALUES (?, ?, ?, ?, ?, ?)`
+        )
+        .run(companyId, name, type, JSON.stringify(configuration ?? {}), createdBy, createdBy);
+      const connectionId = Number(result.lastInsertRowid);
+      for (const source of sources) {
+        dataSources.create({
+          connectionId,
+          name: source.name,
+          type,
+          topic: source.topic,
+          samplingIntervalSeconds: source.samplingIntervalSeconds,
+          storeHistory: source.storeHistory,
+          createdBy,
+        });
+      }
+      db.exec('COMMIT');
+      return {
+        ...this.findById(connectionId),
+        dataSources: dataSources.listByConnection(connectionId),
+      };
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+  },
+  updateWithDataSources({ id, companyId, name, type, configuration, dataSources: sources, updatedBy = null }) {
+    const db = getDatabase();
+    db.exec('BEGIN');
+    try {
+      db
+        .prepare(
+          `UPDATE connections
+           SET company_id = ?, name = ?, type = ?, configuration = ?,
+               updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), updated_by = ?
+           WHERE id = ?`
+        )
+        .run(companyId, name, type, JSON.stringify(configuration ?? {}), updatedBy, id);
+
+      const existing = dataSources.listByConnection(id);
+      const incomingIds = new Set(sources.filter((source) => source.id !== null).map((source) => source.id));
+      for (const current of existing) {
+        if (!incomingIds.has(current.id)) {
+          dataSources.remove(current.id);
+        }
+      }
+
+      for (const source of sources) {
+        if (source.id === null) {
+          dataSources.create({
+            connectionId: id,
+            name: source.name,
+            type,
+            topic: source.topic,
+            samplingIntervalSeconds: source.samplingIntervalSeconds,
+            storeHistory: source.storeHistory,
+            createdBy: updatedBy,
+          });
+        } else {
+          const current = dataSources.findById(source.id);
+          if (!current || current.connection_id !== id) {
+            throw new Error(`Fonte de dados ${source.id} não pertence à conexão ${id}.`);
+          }
+          dataSources.update({
+            id: source.id,
+            name: source.name,
+            type,
+            topic: source.topic,
+            samplingIntervalSeconds: source.samplingIntervalSeconds,
+            storeHistory: source.storeHistory,
+            active: source.active,
+            updatedBy,
+          });
+        }
+      }
+
+      db.exec('COMMIT');
+      return {
+        ...this.findById(id),
+        dataSources: dataSources.listByConnection(id),
+      };
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+  },
+  setActive({ id, active, updatedBy = null }) {
+    getDatabase()
+      .prepare(
+        `UPDATE connections
+         SET active = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), updated_by = ?
+         WHERE id = ?`
+      )
+      .run(active ? 1 : 0, updatedBy, id);
+    return this.findById(id);
+  },
+  remove(id) {
+    return getDatabase().prepare('DELETE FROM connections WHERE id = ?').run(id).changes > 0;
   },
 };
 
