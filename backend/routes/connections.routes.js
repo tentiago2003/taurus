@@ -8,6 +8,8 @@ function register(router) {
   router.put('/api/connections/:id', asyncHandler(controller.update));
   router.post('/api/connections/:id/deactivate', asyncHandler(controller.deactivate));
   router.post('/api/connections/:id/reactivate', asyncHandler(controller.reactivate));
+  router.post('/api/connections/:id/reconnect', asyncHandler(controller.reconnect));
+  router.get('/api/connections/:id/events', asyncHandler(controller.events));
   router.delete('/api/connections/:id', asyncHandler(controller.remove));
 }
 

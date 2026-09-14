@@ -129,3 +129,11 @@ export function reactivateConnection(id) {
 export function deleteConnection(id) {
   return request(`/connections/${id}`, { method: 'DELETE' })
 }
+
+export function reconnectConnection(id) {
+  return request(`/connections/${id}/reconnect`, { method: 'POST' })
+}
+
+export function fetchConnectionEvents(id) {
+  return request(`/connections/${id}/events`)
+}

@@ -14,6 +14,8 @@ import {
   deactivateConnection,
   reactivateConnection,
   deleteConnection,
+  reconnectConnection,
+  fetchConnectionEvents,
   createUser,
   updateUser,
   deactivateUser,
@@ -42,6 +44,9 @@ function LoginPage({ onLogin }) {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [eventConnection, setEventConnection] = useState(null)
+  const [events, setEvents] = useState([])
+  const [eventsLoading, setEventsLoading] = useState(false)
 
   const handleSubmit = async (event) => {
     event.preventDefault()
@@ -107,6 +112,9 @@ function CompaniesPage() {
   const [loadError, setLoadError] = useState('')
   const [name, setName] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [eventConnection, setEventConnection] = useState(null)
+  const [events, setEvents] = useState([])
+  const [eventsLoading, setEventsLoading] = useState(false)
   const [formError, setFormError] = useState('')
   const [actionError, setActionError] = useState('')
   const [editingId, setEditingId] = useState(null)
@@ -392,6 +400,9 @@ function UsersPage() {
 
   const [form, setForm] = useState(emptyUserForm)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [eventConnection, setEventConnection] = useState(null)
+  const [events, setEvents] = useState([])
+  const [eventsLoading, setEventsLoading] = useState(false)
   const [formError, setFormError] = useState('')
 
   const [actionError, setActionError] = useState('')
@@ -817,7 +828,19 @@ function UsersPage() {
   )
 }
 
-function ConnectionPage({ isTestActive, onStartTest }) {
+function runtimeLabel(status) {
+  const labels = {
+    inactive: 'Inativa',
+    connecting: 'Conectando',
+    connected: 'Conectada',
+    reconnecting: 'Reconectando',
+    disconnected: 'Desconectada',
+    error: 'Falha',
+  }
+  return labels[status] || status || 'Desconectada'
+}
+
+function ConnectionPage({ isTestActive, onStartTest, runtimeStatuses }) {
   const emptyTopic = () => ({ id: null, name: '', topic: '', samplingIntervalSeconds: 600, storeHistory: true, active: true })
   const emptyForm = () => ({ id: null, companyId: '', name: '', type: 'MQTT', host: '', port: '', username: '', password: '', topics: [emptyTopic()] })
   const [connections, setConnections] = useState([])
@@ -828,6 +851,9 @@ function ConnectionPage({ isTestActive, onStartTest }) {
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState(emptyForm)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [eventConnection, setEventConnection] = useState(null)
+  const [events, setEvents] = useState([])
+  const [eventsLoading, setEventsLoading] = useState(false)
 
   const loadAll = async () => {
     setIsLoading(true)
@@ -975,6 +1001,27 @@ function ConnectionPage({ isTestActive, onStartTest }) {
     } catch (err) { setActionError(err.message || 'Não foi possível reativar a conexão.') }
   }
 
+  const handleReconnect = async (connection) => {
+    try {
+      await reconnectConnection(connection.id)
+      await loadAll()
+    } catch (err) { setActionError(err.message || 'Não foi possível reconectar a conexão.') }
+  }
+
+  const handleShowEvents = async (connection) => {
+    setEventConnection(connection)
+    setEvents([])
+    setEventsLoading(true)
+    try {
+      setEvents(await fetchConnectionEvents(connection.id))
+    } catch (err) {
+      setActionError(err.message || 'Não foi possível carregar o log da conexão.')
+      setEventConnection(null)
+    } finally {
+      setEventsLoading(false)
+    }
+  }
+
   const handleDelete = async (connection) => {
     if (!window.confirm(`Excluir definitivamente a conexão "${connection.name}"?`)) return
     try {
@@ -1028,7 +1075,9 @@ function ConnectionPage({ isTestActive, onStartTest }) {
   }
 
   return (
-    <div className="page-content connections-page">
+    <>
+      <div className="page-content connections-page">
+
       <div className="connections-header">
         <div><h2>Conexões</h2><p className="page-description">Gerencie as conexões externas utilizadas pelo Taurus.</p></div>
         <button className="btn-test" onClick={openNew}>+ Nova conexão</button>
@@ -1043,17 +1092,43 @@ function ConnectionPage({ isTestActive, onStartTest }) {
           <table className="slaves-table connections-table"><thead><tr><th>Nome</th><th>Empresa</th><th>Tipo</th><th>Status</th><th>Tópicos</th><th>Ações</th></tr></thead>
           <tbody>{connections.map((connection) => <tr key={connection.id}>
             <td>{connection.name}</td><td>{companies.find((c) => c.id === connection.company_id)?.name || connection.company_id}</td><td>{connection.type}</td>
-            <td><span className={`status-badge ${connection.active ? 'active' : 'inactive'}`}>{connection.active ? 'Ativa' : 'Inativa'}</span></td>
+            <td><span className={`status-badge runtime-${(runtimeStatuses?.[connection.id]?.status || connection.runtime?.status || (connection.active ? 'disconnected' : 'inactive'))}`}>{runtimeLabel(runtimeStatuses?.[connection.id]?.status || connection.runtime?.status || (connection.active ? 'disconnected' : 'inactive'))}</span></td>
             <td>{connection.dataSources?.length || 0}</td>
             <td><div className="table-actions">
               <button className="btn-small" onClick={() => openEdit(connection)}>Editar</button>
-              {connection.active ? <button className="btn-small" onClick={() => handleDeactivate(connection)}>Desativar</button> : <button className="btn-small" onClick={() => handleReactivate(connection)}>Reativar</button>}
+              {connection.active ? <>
+                <button className="btn-small" onClick={() => handleDeactivate(connection)}>Desativar</button>
+                {['disconnected', 'error'].includes(runtimeStatuses?.[connection.id]?.status || connection.runtime?.status) && <button className="btn-small" onClick={() => handleReconnect(connection)}>Reconectar</button>}
+              </> : <button className="btn-small" onClick={() => handleReactivate(connection)}>Ativar</button>}
+              <button className="btn-small" onClick={() => handleShowEvents(connection)}>Log</button>
               <button className="btn-small danger" onClick={() => handleDelete(connection)}>Excluir</button>
             </div></td>
           </tr>)}</tbody></table>
         </div>
       )}
-    </div>
+      </div>
+      {eventConnection && (
+        <div className="connection-events-backdrop">
+          <section className="connection-events-modal" role="dialog" aria-modal="true">
+            <div className="connection-events-header">
+              <div><h2>Log da conexão</h2><p>{eventConnection.name}</p></div>
+              <button className="btn-small" onClick={() => setEventConnection(null)}>Fechar</button>
+            </div>
+            {eventsLoading ? <div className="empty-state"><p>Carregando eventos...</p></div> : events.length === 0 ? <div className="empty-state"><p>Nenhum evento registrado.</p></div> : (
+              <div className="connection-events-list">
+                {events.map((event) => (
+                  <div className="connection-event-row" key={event.id}>
+                    <span className="connection-event-time">{event.timestamp}</span>
+                    <span className={`connection-event-type event-${event.event_type.toLowerCase()}`}>{event.event_type}</span>
+                    <span className="connection-event-message">{event.message || ''}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+      )}
+    </>
   )
 }
 
@@ -1154,6 +1229,7 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [currentPage, setCurrentPage] = useState('home')
   const [isConnected, setIsConnected] = useState(false)
+  const [connectionStatuses, setConnectionStatuses] = useState({})
   const socketRef = useRef(null)
   const mqttTestTimerRef = useRef(null)
   const [mqttTestSession, setMqttTestSession] = useState({
@@ -1222,6 +1298,11 @@ function App() {
           return
         }
 
+        if (payload && payload.type === 'connection_status') {
+          setConnectionStatuses((previous) => ({ ...previous, [payload.connectionId]: payload }))
+          return
+        }
+
         if (payload && payload.type === 'mqtt_test_status') {
           if (payload.status === 'connected' || payload.status === 'error' || payload.status === 'disconnected') {
             if (mqttTestTimerRef.current) {
@@ -1234,6 +1315,18 @@ function App() {
             isOpen: payload.status !== 'disconnected',
             status: payload.status,
             message: payload.message || '',
+          }))
+          return
+        }
+
+        if (payload && payload.type === 'connection_message') {
+          setConnectionStatuses((previous) => ({
+            ...previous,
+            [payload.connectionId]: {
+              ...(previous[payload.connectionId] || {}),
+              status: 'connected',
+              lastMessageAt: payload.receivedAt,
+            },
           }))
           return
         }
@@ -1449,7 +1542,7 @@ function App() {
         <main className="main-content">
           {currentPage === 'home' && <HomePage />}
           {currentPage === 'connection' && (
-            <ConnectionPage isTestActive={mqttTestSession.isOpen} onStartTest={startMqttTest} />
+            <ConnectionPage isTestActive={mqttTestSession.isOpen} onStartTest={startMqttTest} runtimeStatuses={connectionStatuses} />
           )}
           {currentPage === 'companies' && <CompaniesPage />}
           {currentPage === 'users' && <UsersPage />}

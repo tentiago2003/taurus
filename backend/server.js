@@ -2,7 +2,8 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { WebSocketServer } = require('ws');
-const { createMqttConnection, startMqtt } = require('./mqtt/client');
+const { createMqttConnection } = require('./mqtt/client');
+const connectionManager = require('./services/connection-manager.service');
 const { initDatabase } = require('./db');
 const { handleApiRequest } = require('./http/api');
 const usersService = require('./services/users.service');
@@ -243,10 +244,19 @@ function broadcastToOpenClients(message) {
   });
 }
 
+connectionManager.init({ broadcast: broadcastToOpenClients });
+
 server.listen(port, () => {
   console.log(`Taurus HTTP server running on port ${port}`);
-
-  startMqtt((mqttObject) => {
-    broadcastToOpenClients(mqttObject);
-  });
+  const activeCount = connectionManager.startActiveConnections();
+  console.log(`Restored ${activeCount} active MQTT connection(s).`);
 });
+
+function shutdown(signal) {
+  console.log(`Received ${signal}. Stopping MQTT connections...`);
+  connectionManager.stopAll();
+  server.close(() => process.exit(0));
+}
+
+process.once('SIGINT', () => shutdown('SIGINT'));
+process.once('SIGTERM', () => shutdown('SIGTERM'));

@@ -57,6 +57,19 @@ CREATE TABLE IF NOT EXISTS connections (
 
 CREATE INDEX IF NOT EXISTS idx_connections_company_id ON connections(company_id);
 
+
+CREATE TABLE IF NOT EXISTS connection_events (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  connection_id INTEGER NOT NULL REFERENCES connections(id) ON DELETE CASCADE,
+  event_type    TEXT NOT NULL,
+  timestamp     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  message       TEXT,
+  details       TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_connection_events_connection_timestamp
+  ON connection_events(connection_id, timestamp DESC);
+
 CREATE TABLE IF NOT EXISTS data_sources (
   id                         INTEGER PRIMARY KEY AUTOINCREMENT,
   connection_id              INTEGER NOT NULL REFERENCES connections(id) ON DELETE CASCADE,

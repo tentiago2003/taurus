@@ -257,6 +257,38 @@ const dataSources = {
   },
 };
 
+const connectionEvents = {
+  create({ connectionId, eventType, message = null, details = null, timestamp = null }) {
+    const result = getDatabase()
+      .prepare(
+        `INSERT INTO connection_events (connection_id, event_type, timestamp, message, details)
+         VALUES (?, ?, COALESCE(?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')), ?, ?)`
+      )
+      .run(
+        connectionId,
+        eventType,
+        timestamp,
+        message,
+        details === null || details === undefined ? null : JSON.stringify(details)
+      );
+    return this.findById(result.lastInsertRowid);
+  },
+  findById(id) {
+    return parseJson(getDatabase().prepare('SELECT * FROM connection_events WHERE id = ?').get(id), ['details']);
+  },
+  listByConnection(connectionId, { limit = 50 } = {}) {
+    return getDatabase()
+      .prepare(
+        `SELECT * FROM connection_events
+         WHERE connection_id = ?
+         ORDER BY timestamp DESC
+         LIMIT ?`
+      )
+      .all(connectionId, limit)
+      .map((row) => parseJson(row, ['details']));
+  },
+};
+
 const connections = {
   list() {
     return getDatabase()
@@ -270,14 +302,20 @@ const connections = {
       .all(companyId)
       .map((row) => parseJson(row));
   },
+  listActive() {
+    return getDatabase()
+      .prepare('SELECT * FROM connections WHERE active = 1 ORDER BY name')
+      .all()
+      .map((row) => parseJson(row));
+  },
   findById(id) {
     return parseJson(getDatabase().prepare('SELECT * FROM connections WHERE id = ?').get(id));
   },
   create({ companyId, name, type, configuration, createdBy = null }) {
     const result = getDatabase()
       .prepare(
-        `INSERT INTO connections (company_id, name, type, configuration, created_by, updated_by)
-         VALUES (?, ?, ?, ?, ?, ?)`
+        `INSERT INTO connections (company_id, name, type, configuration, active, created_by, updated_by)
+         VALUES (?, ?, ?, ?, 0, ?, ?)`
       )
       .run(companyId, name, type, JSON.stringify(configuration ?? {}), createdBy, createdBy);
     return this.findById(result.lastInsertRowid);
@@ -288,8 +326,8 @@ const connections = {
     try {
       const result = db
         .prepare(
-          `INSERT INTO connections (company_id, name, type, configuration, created_by, updated_by)
-           VALUES (?, ?, ?, ?, ?, ?)`
+          `INSERT INTO connections (company_id, name, type, configuration, active, created_by, updated_by)
+           VALUES (?, ?, ?, ?, 0, ?, ?)`
         )
         .run(companyId, name, type, JSON.stringify(configuration ?? {}), createdBy, createdBy);
       const connectionId = Number(result.lastInsertRowid);
@@ -446,6 +484,7 @@ module.exports = {
   profiles,
   users,
   systemSettings,
+  connectionEvents,
   measurements,
   dataSources,
   connections,
