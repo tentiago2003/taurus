@@ -30,7 +30,8 @@ function cookieOptions(req) {
 function publicUser(user) {
   if (!user) return null;
   const { password_hash, ...safe } = user;
-  return safe;
+  const profile = repository.profiles.findById(user.profile_id);
+  return { ...safe, profile_name: profile?.name ?? null };
 }
 
 function login(email, password) {

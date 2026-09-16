@@ -31,6 +31,7 @@ function initDatabase() {
 
   migrateCompaniesActiveColumn(db);
   seedProfiles(db);
+  migrateSystemSettings(db);
   seedSystemSettings(db);
 
   return db;
@@ -43,6 +44,20 @@ function migrateCompaniesActiveColumn(database) {
   if (!hasActive) {
     database.exec(
       'ALTER TABLE companies ADD COLUMN active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1))'
+    );
+  }
+}
+
+
+/** Migração idempotente: adiciona parâmetros globais a bancos criados antes deles existirem. */
+function migrateSystemSettings(database) {
+  const columns = database.prepare('PRAGMA table_info(system_settings)').all();
+  const hasDefaultSamplingInterval = columns.some(
+    (column) => column.name === 'default_sampling_interval_seconds'
+  );
+  if (!hasDefaultSamplingInterval) {
+    database.exec(
+      'ALTER TABLE system_settings ADD COLUMN default_sampling_interval_seconds INTEGER NOT NULL DEFAULT 600 CHECK (default_sampling_interval_seconds > 0)'
     );
   }
 }
@@ -72,7 +87,7 @@ function seedProfiles(database) {
 function seedSystemSettings(database) {
   database
     .prepare(
-      'INSERT OR IGNORE INTO system_settings (id, measurement_retention_days) VALUES (1, 7)'
+      'INSERT OR IGNORE INTO system_settings (id, measurement_retention_days, default_sampling_interval_seconds) VALUES (1, 7, 600)'
     )
     .run();
 }

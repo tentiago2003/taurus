@@ -144,7 +144,8 @@ CREATE INDEX IF NOT EXISTS idx_widget_data_sources_data_source_id
 
 CREATE TABLE IF NOT EXISTS system_settings (
   id                         INTEGER PRIMARY KEY CHECK (id = 1),
-  measurement_retention_days INTEGER NOT NULL DEFAULT 7 CHECK (measurement_retention_days > 0),
+  measurement_retention_days       INTEGER NOT NULL DEFAULT 7 CHECK (measurement_retention_days > 0),
+  default_sampling_interval_seconds INTEGER NOT NULL DEFAULT 600 CHECK (default_sampling_interval_seconds > 0),
   updated_at                 TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_by                 INTEGER REFERENCES users(id) ON DELETE SET NULL
 );

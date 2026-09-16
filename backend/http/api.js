@@ -28,6 +28,14 @@ async function handleApiRequest(req, res) {
       return true;
     }
     req.user = user;
+
+    if (pathname === '/api/system-settings') {
+      const profile = require('../db/repository').profiles.findById(user.profile_id);
+      if (profile?.name !== 'Admin') {
+        sendJson(res, 403, { error: 'Apenas usuários Admin podem acessar os parâmetros do sistema.' });
+        return true;
+      }
+    }
   }
 
   await match.handler(req, res, match.params);

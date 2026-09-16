@@ -137,3 +137,15 @@ export function reconnectConnection(id) {
 export function fetchConnectionEvents(id) {
   return request(`/connections/${id}/events`)
 }
+
+
+export function fetchSystemSettings() {
+  return request('/system-settings')
+}
+
+export function updateSystemSettings(data) {
+  return request('/system-settings', {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}

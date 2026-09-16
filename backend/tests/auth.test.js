@@ -29,6 +29,7 @@ test('login com credenciais válidas cria sessão', () => {
   assert.equal(result.user.id, created.id);
   assert.ok(result.token);
   assert.equal(result.user.password_hash, undefined);
+  assert.equal(result.user.profile_name, 'Admin');
 });
 
 test('login com senha inválida retorna 401', () => {

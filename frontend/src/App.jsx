@@ -23,6 +23,8 @@ import {
   login,
   fetchCurrentUser,
   logout,
+  fetchSystemSettings,
+  updateSystemSettings,
 } from './api'
 
 const formatBuildTime = (isoString) => {
@@ -1195,6 +1197,127 @@ function MqttTestModal({ session, onClose }) {
   )
 }
 
+function SystemSettingsPage() {
+  const [settings, setSettings] = useState(null)
+  const [retentionDays, setRetentionDays] = useState('')
+  const [samplingMinutes, setSamplingMinutes] = useState('')
+  const [isLoading, setIsLoading] = useState(true)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+
+  const loadSettings = async () => {
+    setIsLoading(true)
+    setError('')
+    try {
+      const data = await fetchSystemSettings()
+      setSettings(data)
+      setRetentionDays(String(data.measurement_retention_days))
+      setSamplingMinutes(String(Math.round(data.default_sampling_interval_seconds / 60)))
+    } catch (err) {
+      setError(err.message || 'Não foi possível carregar os parâmetros do sistema.')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadSettings()
+  }, [])
+
+  const handleSubmit = async (event) => {
+    event.preventDefault()
+    setError('')
+    setSuccess('')
+
+    const retention = Number(retentionDays)
+    const sampling = Number(samplingMinutes)
+    if (!Number.isInteger(retention) || retention <= 0) {
+      setError('A retenção deve ser um número inteiro maior que zero.')
+      return
+    }
+    if (!Number.isInteger(sampling) || sampling <= 0) {
+      setError('O intervalo padrão deve ser um número inteiro de minutos maior que zero.')
+      return
+    }
+
+    setIsSubmitting(true)
+    try {
+      const updated = await updateSystemSettings({
+        measurementRetentionDays: retention,
+        defaultSamplingIntervalSeconds: sampling * 60,
+      })
+      setSettings(updated)
+      setRetentionDays(String(updated.measurement_retention_days))
+      setSamplingMinutes(String(Math.round(updated.default_sampling_interval_seconds / 60)))
+      setSuccess('Parâmetros salvos com sucesso.')
+    } catch (err) {
+      setError(err.message || 'Não foi possível salvar os parâmetros do sistema.')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  if (isLoading) {
+    return (
+      <div className="page-content">
+        <h2>Parâmetros do Sistema</h2>
+        <div className="empty-state"><p>Carregando...</p></div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="page-content system-settings-page">
+      <h2>Parâmetros do Sistema</h2>
+      <p className="page-description">Configurações globais utilizadas pelo Taurus.</p>
+
+      <form className="system-settings-card" onSubmit={handleSubmit}>
+        <div className="settings-field">
+          <label htmlFor="measurement-retention">Retenção das medições</label>
+          <div className="settings-input-row">
+            <input
+              id="measurement-retention"
+              type="number"
+              min="1"
+              step="1"
+              value={retentionDays}
+              onChange={(e) => setRetentionDays(e.target.value)}
+              disabled={isSubmitting}
+            />
+            <span>dias</span>
+          </div>
+          <small>Tempo que o histórico de medições deverá permanecer armazenado.</small>
+        </div>
+
+        <div className="settings-field">
+          <label htmlFor="default-sampling">Intervalo padrão de medição</label>
+          <div className="settings-input-row">
+            <input
+              id="default-sampling"
+              type="number"
+              min="1"
+              step="1"
+              value={samplingMinutes}
+              onChange={(e) => setSamplingMinutes(e.target.value)}
+              disabled={isSubmitting}
+            />
+            <span>minutos</span>
+          </div>
+          <small>Valor padrão usado ao criar novas fontes de dados. Cada fonte poderá ter seu próprio intervalo.</small>
+        </div>
+
+        {error && <div className="test-status error"><p>{error}</p></div>}
+        {success && <div className="test-status success"><p>{success}</p></div>}
+
+        <button className="btn-test settings-save-button" type="submit" disabled={isSubmitting || !settings}>
+          {isSubmitting ? 'Salvando...' : 'Salvar parâmetros'}
+        </button>
+      </form>
+    </div>
+  )
+}
+
 function AboutPage() {
   return (
     <div className="page-content">
@@ -1528,6 +1651,14 @@ function App() {
             >
               Usuários
             </button>
+            {currentUser.profile_name === 'Admin' && (
+              <button
+                className={`nav-item ${currentPage === 'system-settings' ? 'active' : ''}`}
+                onClick={() => handlePageChange('system-settings')}
+              >
+                Parâmetros do Sistema
+              </button>
+            )}
             <button
               className={`nav-item ${currentPage === 'about' ? 'active' : ''}`}
               onClick={() => handlePageChange('about')}
@@ -1546,6 +1677,7 @@ function App() {
           )}
           {currentPage === 'companies' && <CompaniesPage />}
           {currentPage === 'users' && <UsersPage />}
+          {currentPage === 'system-settings' && currentUser.profile_name === 'Admin' && <SystemSettingsPage />}
           {currentPage === 'about' && <AboutPage />}
         </main>
       </div>

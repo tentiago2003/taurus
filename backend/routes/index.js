@@ -7,6 +7,7 @@ const dataSourcesRoutes = require('./dataSources.routes');
 const dashboardsRoutes = require('./dashboards.routes');
 const widgetsRoutes = require('./widgets.routes');
 const authRoutes = require('./auth.routes');
+const systemSettingsRoutes = require('./systemSettings.routes');
 
 const router = new Router();
 
@@ -19,6 +20,7 @@ for (const routes of [
   dashboardsRoutes,
   widgetsRoutes,
   authRoutes,
+  systemSettingsRoutes,
 ]) {
   routes.register(router);
 }

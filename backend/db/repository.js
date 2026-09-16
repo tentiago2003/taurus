@@ -161,6 +161,19 @@ const systemSettings = {
   get() {
     return getDatabase().prepare('SELECT * FROM system_settings WHERE id = 1').get();
   },
+  update({ measurementRetentionDays, defaultSamplingIntervalSeconds, updatedBy = null }) {
+    getDatabase()
+      .prepare(
+        `UPDATE system_settings
+         SET measurement_retention_days = ?,
+             default_sampling_interval_seconds = ?,
+             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+             updated_by = ?
+         WHERE id = 1`
+      )
+      .run(measurementRetentionDays, defaultSamplingIntervalSeconds, updatedBy);
+    return this.get();
+  },
 };
 
 const measurements = {
