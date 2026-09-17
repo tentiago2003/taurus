@@ -32,6 +32,7 @@ function initDatabase() {
   migrateCompaniesActiveColumn(db);
   seedProfiles(db);
   migrateSystemSettings(db);
+  migrateRawMessages(db);
   seedSystemSettings(db);
 
   return db;
@@ -60,6 +61,21 @@ function migrateSystemSettings(database) {
       'ALTER TABLE system_settings ADD COLUMN default_sampling_interval_seconds INTEGER NOT NULL DEFAULT 600 CHECK (default_sampling_interval_seconds > 0)'
     );
   }
+}
+
+/** Migração idempotente: cria a tabela de mensagens brutas em bancos existentes. */
+function migrateRawMessages(database) {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS raw_messages (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      data_source_id INTEGER NOT NULL REFERENCES data_sources(id) ON DELETE CASCADE,
+      topic          TEXT NOT NULL,
+      received_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      payload        BLOB NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_raw_messages_source_received
+      ON raw_messages(data_source_id, received_at);
+  `);
 }
 
 /** Retorna a instância aberta do banco; inicializa se necessário. */

@@ -25,6 +25,8 @@ import {
   logout,
   fetchSystemSettings,
   updateSystemSettings,
+  fetchRawMessages,
+  fetchDataSources,
 } from './api'
 
 const formatBuildTime = (isoString) => {
@@ -830,6 +832,13 @@ function UsersPage() {
   )
 }
 
+function formatLocalDateTime(value) {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString('pt-BR')
+}
+
 function runtimeLabel(status) {
   const labels = {
     inactive: 'Inativa',
@@ -856,6 +865,12 @@ function ConnectionPage({ isTestActive, onStartTest, runtimeStatuses }) {
   const [eventConnection, setEventConnection] = useState(null)
   const [events, setEvents] = useState([])
   const [eventsLoading, setEventsLoading] = useState(false)
+  const [eventPage, setEventPage] = useState(1)
+  const [eventPageSize, setEventPageSize] = useState(50)
+  const [eventPagination, setEventPagination] = useState({ total: 0, totalPages: 1 })
+  const [eventType, setEventType] = useState('')
+  const [eventFromDate, setEventFromDate] = useState('')
+  const [eventToDate, setEventToDate] = useState('')
 
   const loadAll = async () => {
     setIsLoading(true)
@@ -1010,19 +1025,44 @@ function ConnectionPage({ isTestActive, onStartTest, runtimeStatuses }) {
     } catch (err) { setActionError(err.message || 'Não foi possível reconectar a conexão.') }
   }
 
-  const handleShowEvents = async (connection) => {
-    setEventConnection(connection)
-    setEvents([])
-    setEventsLoading(true)
+  const toStartOfDayIso = (value) => value ? new Date(`${value}T00:00:00`).toISOString() : ''
+  const toEndOfDayIso = (value) => value ? new Date(`${value}T23:59:59.999`).toISOString() : ''
+
+  const loadEvents = async ({ requestedPage = eventPage, silent = false, eventTypeOverride = eventType, fromDateOverride = eventFromDate, toDateOverride = eventToDate } = {}) => {
+    if (!eventConnection) return
+    if (!silent) setEventsLoading(true)
     try {
-      setEvents(await fetchConnectionEvents(connection.id))
+      const result = await fetchConnectionEvents(eventConnection.id, {
+        page: requestedPage,
+        pageSize: eventPageSize,
+        eventType: eventTypeOverride,
+        from: toStartOfDayIso(fromDateOverride),
+        to: toEndOfDayIso(toDateOverride),
+      })
+      setEvents(result.rows || [])
+      setEventPagination(result)
+      setEventPage(result.page || requestedPage)
     } catch (err) {
       setActionError(err.message || 'Não foi possível carregar o log da conexão.')
-      setEventConnection(null)
     } finally {
-      setEventsLoading(false)
+      if (!silent) setEventsLoading(false)
     }
   }
+
+  const handleShowEvents = (connection) => {
+    setEventConnection(connection)
+    setEvents([])
+    setEventPage(1)
+    setEventPageSize(50)
+    setEventPagination({ total: 0, totalPages: 1 })
+    setEventType('')
+    setEventFromDate('')
+    setEventToDate('')
+  }
+
+  useEffect(() => {
+    if (eventConnection) loadEvents()
+  }, [eventConnection, eventPage, eventPageSize])
 
   const handleDelete = async (connection) => {
     if (!window.confirm(`Excluir definitivamente a conexão "${connection.name}"?`)) return
@@ -1116,16 +1156,49 @@ function ConnectionPage({ isTestActive, onStartTest, runtimeStatuses }) {
               <div><h2>Log da conexão</h2><p>{eventConnection.name}</p></div>
               <button className="btn-small" onClick={() => setEventConnection(null)}>Fechar</button>
             </div>
-            {eventsLoading ? <div className="empty-state"><p>Carregando eventos...</p></div> : events.length === 0 ? <div className="empty-state"><p>Nenhum evento registrado.</p></div> : (
-              <div className="connection-events-list">
-                {events.map((event) => (
-                  <div className="connection-event-row" key={event.id}>
-                    <span className="connection-event-time">{event.timestamp}</span>
-                    <span className={`connection-event-type event-${event.event_type.toLowerCase()}`}>{event.event_type}</span>
-                    <span className="connection-event-message">{event.message || ''}</span>
-                  </div>
-                ))}
+            <form className="connection-events-filters" onSubmit={(event) => { event.preventDefault(); setEventPage(1); loadEvents({ requestedPage: 1 }) }}>
+              <div className="form-group">
+                <label htmlFor="connection-event-type">Tipo de evento</label>
+                <select id="connection-event-type" value={eventType} onChange={(event) => setEventType(event.target.value)}>
+                  <option value="">Todos os eventos</option>
+                  {['CONNECTING', 'CONNECTED', 'RECONNECTING', 'OFFLINE', 'DISCONNECTED', 'CONNECTION_ERROR', 'RAW_MESSAGE_ERROR', 'BACKEND_SHUTDOWN'].map((type) => <option key={type} value={type}>{type}</option>)}
+                </select>
               </div>
+              <div className="form-group">
+                <label htmlFor="connection-event-from">De</label>
+                <input id="connection-event-from" type="date" value={eventFromDate} onChange={(event) => setEventFromDate(event.target.value)} />
+              </div>
+              <div className="form-group">
+                <label htmlFor="connection-event-to">Até</label>
+                <input id="connection-event-to" type="date" value={eventToDate} onChange={(event) => setEventToDate(event.target.value)} />
+              </div>
+              <div className="connection-events-filter-actions">
+                <button className="btn-test" type="submit">Filtrar</button>
+                <button className="btn-small" type="button" onClick={() => { setEventType(''); setEventFromDate(''); setEventToDate(''); setEventPage(1); loadEvents({ requestedPage: 1, eventTypeOverride: '', fromDateOverride: '', toDateOverride: '' }) }}>Limpar</button>
+              </div>
+            </form>
+            <div className="connection-events-summary">
+              <span><strong>{eventPagination.total || 0}</strong> evento(s) encontrado(s)</span>
+              <span>Horário exibido no fuso local do navegador</span>
+            </div>
+            {eventsLoading ? <div className="empty-state"><p>Carregando eventos...</p></div> : events.length === 0 ? <div className="empty-state"><p>Nenhum evento registrado para os filtros selecionados.</p></div> : (
+              <>
+                <div className="connection-events-list">
+                  {events.map((event) => (
+                    <div className="connection-event-row" key={event.id}>
+                      <span className="connection-event-time">{formatLocalDateTime(event.timestamp)}</span>
+                      <span className={`connection-event-type event-${event.event_type.toLowerCase()}`}>{event.event_type}</span>
+                      <span className="connection-event-message">{event.message || ''}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="connection-events-pagination">
+                  <button className="btn-small" type="button" disabled={eventPage <= 1 || eventsLoading} onClick={() => setEventPage((current) => current - 1)}>Anterior</button>
+                  <span>Página {eventPage} de {eventPagination.totalPages || 1}</span>
+                  <button className="btn-small" type="button" disabled={eventPage >= (eventPagination.totalPages || 1) || eventsLoading} onClick={() => setEventPage((current) => current + 1)}>Próxima</button>
+                  <label>Por página <select value={eventPageSize} onChange={(event) => { setEventPageSize(Number(event.target.value)); setEventPage(1) }}><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option></select></label>
+                </div>
+              </>
             )}
           </section>
         </div>
@@ -1314,6 +1387,169 @@ function SystemSettingsPage() {
           {isSubmitting ? 'Salvando...' : 'Salvar parâmetros'}
         </button>
       </form>
+    </div>
+  )
+}
+
+function RawMessagesPage() {
+  const [messages, setMessages] = useState([])
+  const [dataSources, setDataSources] = useState([])
+  const [selectedDataSource, setSelectedDataSource] = useState('')
+  const [topic, setTopic] = useState('')
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(50)
+  const [pagination, setPagination] = useState({ total: 0, totalPages: 1 })
+  const [isLoading, setIsLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [lastRefresh, setLastRefresh] = useState(null)
+
+  const toStartOfDayIso = (value) => value ? new Date(`${value}T00:00:00`).toISOString() : ''
+  const toEndOfDayIso = (value) => value ? new Date(`${value}T23:59:59.999`).toISOString() : ''
+
+  const loadMessages = async ({ silent = false, requestedPage = page } = {}) => {
+    if (!silent) setIsLoading(true)
+    setLoadError('')
+    try {
+      const result = await fetchRawMessages({
+        dataSourceId: selectedDataSource || null,
+        topic: topic.trim(),
+        from: toStartOfDayIso(fromDate),
+        to: toEndOfDayIso(toDate),
+        page: requestedPage,
+        pageSize,
+      })
+      setMessages(result.rows || [])
+      setPagination(result)
+      setLastRefresh(new Date())
+    } catch (err) {
+      setLoadError(err.message || 'Não foi possível carregar as mensagens brutas.')
+    } finally {
+      if (!silent) setIsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchDataSources()
+      .then(setDataSources)
+      .catch((err) => setLoadError(err.message || 'Não foi possível carregar as fontes de dados.'))
+  }, [])
+
+  useEffect(() => {
+    setPage(1)
+  }, [selectedDataSource, topic, fromDate, toDate, pageSize])
+
+  useEffect(() => {
+    loadMessages()
+    const timer = setInterval(() => loadMessages({ silent: true }), 5000)
+    return () => clearInterval(timer)
+  }, [selectedDataSource, topic, fromDate, toDate, page, pageSize])
+
+  const formatDateTime = (value) => {
+    if (!value) return '-'
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return value
+    return date.toLocaleString('pt-BR')
+  }
+
+  const formatPayload = (message) => {
+    if (message.payload_text === null) return `[binário] ${message.payload_base64}`
+    try { return JSON.stringify(JSON.parse(message.payload_text), null, 2) }
+    catch { return message.payload_text }
+  }
+
+  const applyFilters = (event) => {
+    event.preventDefault()
+    setPage(1)
+    loadMessages({ requestedPage: 1 })
+  }
+
+  const clearFilters = () => {
+    setSelectedDataSource('')
+    setTopic('')
+    setFromDate('')
+    setToDate('')
+    setPage(1)
+  }
+
+  return (
+    <div className="page-content raw-messages-page">
+      <div className="raw-messages-header">
+        <div>
+          <h2>Mensagens Brutas</h2>
+          <p className="page-description">Visualize as mensagens preservadas exatamente como chegaram das fontes de dados.</p>
+        </div>
+        <button className="btn-small" onClick={() => loadMessages()} disabled={isLoading}>
+          {isLoading ? 'Atualizando...' : 'Atualizar'}
+        </button>
+      </div>
+
+      <form className="raw-messages-toolbar" onSubmit={applyFilters}>
+        <div className="raw-messages-filters">
+          <div className="form-group">
+            <label htmlFor="raw-message-source">Fonte de dados</label>
+            <select id="raw-message-source" value={selectedDataSource} onChange={(event) => setSelectedDataSource(event.target.value)}>
+              <option value="">Todas as fontes</option>
+              {dataSources.map((source) => <option key={source.id} value={source.id}>{source.name}{source.topic ? ` — ${source.topic}` : ''}</option>)}
+            </select>
+          </div>
+          <div className="form-group">
+            <label htmlFor="raw-message-topic">Tópico contém</label>
+            <input id="raw-message-topic" value={topic} onChange={(event) => setTopic(event.target.value)} placeholder="Ex.: P2P-IoT/G001" />
+          </div>
+          <div className="form-group">
+            <label htmlFor="raw-message-from">De</label>
+            <input id="raw-message-from" type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} />
+          </div>
+          <div className="form-group">
+            <label htmlFor="raw-message-to">Até</label>
+            <input id="raw-message-to" type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} />
+          </div>
+          <div className="raw-messages-filter-actions">
+            <button className="btn-test" type="submit">Filtrar</button>
+            <button className="btn-small" type="button" onClick={clearFilters}>Limpar</button>
+          </div>
+        </div>
+        <div className="raw-messages-summary">
+          <strong>{pagination.total || 0}</strong> mensagem(ns) encontrada(s)
+          {lastRefresh && <span>Atualizado às {lastRefresh.toLocaleTimeString('pt-BR')}</span>}
+        </div>
+      </form>
+
+      {loadError && <div className="test-status error"><p>{loadError}</p></div>}
+      {isLoading && messages.length === 0 ? <div className="empty-state"><p>Carregando mensagens...</p></div> : messages.length === 0 ? <div className="empty-state"><p>Nenhuma mensagem bruta foi registrada para os filtros selecionados.</p></div> : (
+        <>
+          <div className="raw-messages-list">
+            {messages.map((message) => (
+              <details className="raw-message-card" key={message.id}>
+                <summary>
+                  <span className="raw-message-time">{formatDateTime(message.received_at)}</span>
+                  <span className="raw-message-source">{message.data_source_name}</span>
+                  <span className="raw-message-topic">{message.topic}</span>
+                  <span className="raw-message-size">{message.payload_size_bytes} B</span>
+                </summary>
+                <div className="raw-message-details">
+                  <div className="raw-message-meta">
+                    <span><strong>Conexão:</strong> {message.connection_name}</span>
+                    <span><strong>Fonte:</strong> {message.data_source_name}</span>
+                    <span><strong>Tópico:</strong> {message.topic}</span>
+                    <span><strong>Recebida:</strong> {formatDateTime(message.received_at)}</span>
+                    <span><strong>Tamanho:</strong> {message.payload_size_bytes} bytes</span>
+                  </div>
+                  <div className="raw-message-payload"><div className="raw-message-payload-title">Payload</div><pre>{formatPayload(message)}</pre></div>
+                </div>
+              </details>
+            ))}
+          </div>
+          <div className="raw-messages-pagination">
+            <button className="btn-small" type="button" disabled={page <= 1 || isLoading} onClick={() => setPage((current) => current - 1)}>Anterior</button>
+            <span>Página {page} de {pagination.totalPages || 1}</span>
+            <button className="btn-small" type="button" disabled={page >= (pagination.totalPages || 1) || isLoading} onClick={() => setPage((current) => current + 1)}>Próxima</button>
+            <label>Por página <select value={pageSize} onChange={(event) => setPageSize(Number(event.target.value))}><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option></select></label>
+          </div>
+        </>
+      )}
     </div>
   )
 }
@@ -1640,6 +1876,12 @@ function App() {
               Conexão
             </button>
             <button
+              className={`nav-item ${currentPage === 'raw-messages' ? 'active' : ''}`}
+              onClick={() => handlePageChange('raw-messages')}
+            >
+              Mensagens Brutas
+            </button>
+            <button
               className={`nav-item ${currentPage === 'companies' ? 'active' : ''}`}
               onClick={() => handlePageChange('companies')}
             >
@@ -1675,6 +1917,7 @@ function App() {
           {currentPage === 'connection' && (
             <ConnectionPage isTestActive={mqttTestSession.isOpen} onStartTest={startMqttTest} runtimeStatuses={connectionStatuses} />
           )}
+          {currentPage === 'raw-messages' && <RawMessagesPage />}
           {currentPage === 'companies' && <CompaniesPage />}
           {currentPage === 'users' && <UsersPage />}
           {currentPage === 'system-settings' && currentUser.profile_name === 'Admin' && <SystemSettingsPage />}

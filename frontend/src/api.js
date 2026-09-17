@@ -96,6 +96,10 @@ export function reactivateUser(id) {
   return request(`/users/${id}/reactivate`, { method: 'POST' })
 }
 
+export function fetchDataSources() {
+  return request('/data-sources')
+}
+
 export function fetchConnections() {
   return request('/connections')
 }
@@ -134,8 +138,14 @@ export function reconnectConnection(id) {
   return request(`/connections/${id}/reconnect`, { method: 'POST' })
 }
 
-export function fetchConnectionEvents(id) {
-  return request(`/connections/${id}/events`)
+export function fetchConnectionEvents(id, { page = 1, pageSize = 50, eventType = '', from = '', to = '' } = {}) {
+  const params = new URLSearchParams()
+  params.set('page', page)
+  params.set('pageSize', pageSize)
+  if (eventType) params.set('eventType', eventType)
+  if (from) params.set('from', from)
+  if (to) params.set('to', to)
+  return request(`/connections/${id}/events?${params.toString()}`)
 }
 
 
@@ -148,4 +158,16 @@ export function updateSystemSettings(data) {
     method: 'PUT',
     body: JSON.stringify(data),
   })
+}
+
+
+export function fetchRawMessages({ dataSourceId = null, topic = '', from = '', to = '', page = 1, pageSize = 50 } = {}) {
+  const params = new URLSearchParams()
+  if (dataSourceId !== null && dataSourceId !== undefined && dataSourceId !== '') params.set('dataSourceId', dataSourceId)
+  if (topic) params.set('topic', topic)
+  if (from) params.set('from', from)
+  if (to) params.set('to', to)
+  params.set('page', page)
+  params.set('pageSize', pageSize)
+  return request(`/raw-messages?${params.toString()}`)
 }

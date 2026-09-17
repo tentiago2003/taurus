@@ -48,7 +48,13 @@ async function reconnect(req, res, params) {
 async function events(req, res, params) {
   const id = parseIdParam(params.id);
   service.get(id);
-  sendJson(res, 200, repository.connectionEvents.listByConnection(id));
+  const url = new URL(req.url, 'http://localhost');
+  const eventType = url.searchParams.get('eventType') || null;
+  const from = url.searchParams.get('from') || null;
+  const to = url.searchParams.get('to') || null;
+  const page = url.searchParams.get('page') || 1;
+  const pageSize = url.searchParams.get('pageSize') || 50;
+  sendJson(res, 200, repository.connectionEvents.listPagedByConnection(id, { page, pageSize, eventType, from, to }));
 }
 
 async function remove(req, res, params) {

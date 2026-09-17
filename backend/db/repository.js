@@ -176,6 +176,79 @@ const systemSettings = {
   },
 };
 
+const rawMessages = {
+  insert({ dataSourceId, topic, receivedAt = null, payload }) {
+    if (!topic) throw new TypeError('raw_messages.topic é obrigatório');
+    if (payload === null || payload === undefined) throw new TypeError('raw_messages.payload é obrigatório');
+    const bytes = payload instanceof Uint8Array ? payload : new Uint8Array(payload);
+    const result = getDatabase()
+      .prepare(`INSERT INTO raw_messages (data_source_id, topic, received_at, payload)
+                VALUES (?, ?, COALESCE(?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')), ?)`)
+      .run(dataSourceId, topic, receivedAt, bytes);
+    return this.findById(result.lastInsertRowid);
+  },
+  findById(id) {
+    return getDatabase().prepare('SELECT * FROM raw_messages WHERE id = ?').get(id);
+  },
+  listByDataSource(dataSourceId, { limit = 100 } = {}) {
+    return getDatabase()
+      .prepare(`SELECT id, data_source_id, topic, received_at, length(payload) AS payload_size_bytes
+                FROM raw_messages WHERE data_source_id = ?
+                ORDER BY received_at DESC, id DESC LIMIT ?`)
+      .all(dataSourceId, limit);
+  },
+  listRecentPaged({ dataSourceId = null, topic = null, from = null, to = null, page = 1, pageSize = 50 } = {}) {
+    const safePageSize = Math.min(Math.max(Number.parseInt(pageSize, 10) || 50, 1), 100);
+    const safePage = Math.max(Number.parseInt(page, 10) || 1, 1);
+    const conditions = [];
+    const params = [];
+
+    if (dataSourceId !== null && dataSourceId !== undefined && dataSourceId !== '') {
+      conditions.push('rm.data_source_id = ?');
+      params.push(Number.parseInt(dataSourceId, 10));
+    }
+    if (topic !== null && topic !== undefined && String(topic).trim() !== '') {
+      conditions.push('rm.topic LIKE ?');
+      params.push(`%${String(topic).trim()}%`);
+    }
+    if (from) {
+      conditions.push('rm.received_at >= ?');
+      params.push(from);
+    }
+    if (to) {
+      conditions.push('rm.received_at <= ?');
+      params.push(to);
+    }
+
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const count = getDatabase()
+      .prepare(`SELECT COUNT(*) AS total FROM raw_messages rm ${where}`)
+      .get(...params).total;
+    const rows = getDatabase()
+      .prepare(`SELECT rm.id, rm.data_source_id, ds.name AS data_source_name,
+                       c.id AS connection_id, c.name AS connection_name,
+                       rm.topic, rm.received_at, length(rm.payload) AS payload_size_bytes, rm.payload
+                FROM raw_messages rm
+                JOIN data_sources ds ON ds.id = rm.data_source_id
+                JOIN connections c ON c.id = ds.connection_id
+                ${where}
+                ORDER BY rm.received_at DESC, rm.id DESC
+                LIMIT ? OFFSET ?`)
+      .all(...params, safePageSize, (safePage - 1) * safePageSize);
+
+    return {
+      rows,
+      total: Number(count),
+      page: safePage,
+      pageSize: safePageSize,
+      totalPages: Math.max(Math.ceil(Number(count) / safePageSize), 1),
+    };
+  },
+  listRecent(options = {}) {
+    return this.listRecentPaged(options).rows;
+  },
+};
+
 const measurements = {
   /** Insere uma medição vinda de uma fonte de dados. */
   insert({ dataSourceId, timestamp, value, payload = null }) {
@@ -223,6 +296,13 @@ const dataSources = {
   findById(id) {
     return parseJson(
       getDatabase().prepare('SELECT * FROM data_sources WHERE id = ?').get(id)
+    );
+  },
+  findByConnectionAndTopic(connectionId, topic) {
+    return parseJson(
+      getDatabase()
+        .prepare('SELECT * FROM data_sources WHERE connection_id = ? AND topic = ?')
+        .get(connectionId, topic)
     );
   },
   create({
@@ -299,6 +379,38 @@ const connectionEvents = {
       )
       .all(connectionId, limit)
       .map((row) => parseJson(row, ['details']));
+  },
+  listPagedByConnection(connectionId, { page = 1, pageSize = 50, eventType = null, from = null, to = null } = {}) {
+    const safePage = Math.max(1, Number.parseInt(page, 10) || 1);
+    const safePageSize = Math.min(100, Math.max(10, Number.parseInt(pageSize, 10) || 50));
+    const conditions = ['connection_id = ?'];
+    const params = [connectionId];
+
+    if (eventType) {
+      conditions.push('event_type = ?');
+      params.push(eventType);
+    }
+    if (from) {
+      conditions.push('timestamp >= ?');
+      params.push(from);
+    }
+    if (to) {
+      conditions.push('timestamp <= ?');
+      params.push(to);
+    }
+
+    const where = conditions.join(' AND ');
+    const db = getDatabase();
+    const total = db.prepare(`SELECT COUNT(*) AS total FROM connection_events WHERE ${where}`).get(...params).total;
+    const totalPages = Math.max(1, Math.ceil(total / safePageSize));
+    const currentPage = Math.min(safePage, totalPages);
+    const offset = (currentPage - 1) * safePageSize;
+    const rows = db
+      .prepare(`SELECT * FROM connection_events WHERE ${where} ORDER BY timestamp DESC LIMIT ? OFFSET ?`)
+      .all(...params, safePageSize, offset)
+      .map((row) => parseJson(row, ['details']));
+
+    return { rows, total, page: currentPage, pageSize: safePageSize, totalPages };
   },
 };
 
@@ -498,6 +610,7 @@ module.exports = {
   users,
   systemSettings,
   connectionEvents,
+  rawMessages,
   measurements,
   dataSources,
   connections,

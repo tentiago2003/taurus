@@ -102,6 +102,18 @@ CREATE TABLE IF NOT EXISTS measurements (
 CREATE INDEX IF NOT EXISTS idx_measurements_source_timestamp
   ON measurements(data_source_id, timestamp);
 
+CREATE TABLE IF NOT EXISTS raw_messages (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  data_source_id INTEGER NOT NULL REFERENCES data_sources(id) ON DELETE CASCADE,
+  topic          TEXT NOT NULL,
+  received_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  payload        BLOB NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_raw_messages_source_received
+  ON raw_messages(data_source_id, received_at);
+
+
 CREATE TABLE IF NOT EXISTS dashboards (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   company_id  INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,

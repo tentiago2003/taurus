@@ -254,7 +254,7 @@ server.listen(port, () => {
 
 function shutdown(signal) {
   console.log(`Received ${signal}. Stopping MQTT connections...`);
-  connectionManager.stopAll();
+  connectionManager.stopAll({ log: true });
   server.close(() => process.exit(0));
 }
 

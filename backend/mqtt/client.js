@@ -6,8 +6,10 @@ function createMqttConnection(config) {
   let onConnect;
   let onError;
   let onMessage;
+  let onRawMessage;
   let onClose;
   let onReconnect;
+  let onOffline;
 
   function connect() {
     client = mqtt.connect({
@@ -27,11 +29,19 @@ function createMqttConnection(config) {
       if (typeof onReconnect === 'function') onReconnect();
     });
 
+    client.on('offline', () => {
+      if (typeof onOffline === 'function') onOffline();
+    });
+
     client.on('close', () => {
       if (typeof onClose === 'function') onClose();
     });
 
     client.on('message', (topic, payload) => {
+      if (typeof onRawMessage === 'function') {
+        onRawMessage(payload, topic, new Date().toISOString());
+      }
+
       try {
         const parsedPayload = parseMqttPayload(payload.toString());
         console.log(`Parsed message from ${topic}:`, parsedPayload);
@@ -76,8 +86,10 @@ function createMqttConnection(config) {
     onConnect(callback) { onConnect = callback; return this; },
     onError(callback) { onError = callback; return this; },
     onMessage(callback) { onMessage = callback; return this; },
+    onRawMessage(callback) { onRawMessage = callback; return this; },
     onClose(callback) { onClose = callback; return this; },
     onReconnect(callback) { onReconnect = callback; return this; },
+    onOffline(callback) { onOffline = callback; return this; },
   };
 }
 

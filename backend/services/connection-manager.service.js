@@ -1,5 +1,6 @@
 const repository = require('../db/repository');
 const { createMqttConnection } = require('../mqtt/client');
+const rawMessagesService = require('./rawMessages.service');
 
 const RECONNECT_PERIOD_MS = 5000;
 const runtime = new Map();
@@ -88,13 +89,28 @@ function start(connectionId) {
     .onReconnect(() => {
       if (runtime.get(connectionId)?.connection !== mqttConnection) return;
       setRuntimeStatus(connectionId, 'reconnecting', 'Tentando restabelecer a conexão...');
-      logEvent(connectionId, 'RECONNECTING', 'Tentando restabelecer a conexão MQTT.');
+      logEvent(connectionId, 'RECONNECTING', 'Tentando restabelecer a conexão MQTT.', { reconnectPeriodMs: RECONNECT_PERIOD_MS });
+    })
+    .onOffline(() => {
+      if (runtime.get(connectionId)?.connection !== mqttConnection) return;
+      logEvent(connectionId, 'OFFLINE', 'Cliente MQTT ficou offline; aguardando reconexão.', { reconnectPeriodMs: RECONNECT_PERIOD_MS });
     })
     .onClose(() => {
       if (runtime.get(connectionId)?.connection !== mqttConnection) return;
       entry.status = 'disconnected';
       logEvent(connectionId, 'DISCONNECTED', 'Conexão MQTT perdida. O cliente tentará reconectar automaticamente.');
       emitStatus(connectionId, 'disconnected', 'Conexão perdida. Aguardando reconexão...');
+    })
+    .onRawMessage((payload, topic, receivedAt) => {
+      if (runtime.get(connectionId)?.connection !== mqttConnection) return;
+      try {
+        rawMessagesService.collect({ connectionId, topic, payload, receivedAt });
+      } catch (error) {
+        logEvent(connectionId, 'RAW_MESSAGE_ERROR', `Erro ao armazenar mensagem bruta: ${error.message}`, {
+          topic,
+          error: error.message,
+        });
+      }
     })
     .onError((error) => {
       if (runtime.get(connectionId)?.connection !== mqttConnection) return;
@@ -176,8 +192,11 @@ function startActiveConnections() {
   return activeConnections.length;
 }
 
-function stopAll() {
-  for (const connectionId of Array.from(runtime.keys())) stop(connectionId, { log: false });
+function stopAll({ log = false, eventType = 'BACKEND_SHUTDOWN', message = 'Backend encerrado; conexão MQTT interrompida pelo Taurus.' } = {}) {
+  for (const connectionId of Array.from(runtime.keys())) {
+    if (log) logEvent(connectionId, eventType, message);
+    stop(connectionId, { log: false });
+  }
 }
 
 function listStatuses() {
