@@ -93,6 +93,7 @@ CREATE INDEX IF NOT EXISTS idx_data_sources_connection_id ON data_sources(connec
 CREATE TABLE IF NOT EXISTS measurements (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
   data_source_id INTEGER NOT NULL REFERENCES data_sources(id) ON DELETE CASCADE,
+  metric         TEXT NOT NULL DEFAULT 'value',
   timestamp      TEXT NOT NULL, -- UTC ISO-8601
   value          REAL NOT NULL,
   payload        TEXT, -- JSON bruto opcional

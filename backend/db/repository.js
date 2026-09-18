@@ -251,17 +251,18 @@ const rawMessages = {
 
 const measurements = {
   /** Insere uma medição vinda de uma fonte de dados. */
-  insert({ dataSourceId, timestamp, value, payload = null }) {
+  insert({ dataSourceId, metric = 'value', timestamp, value, payload = null }) {
     if (value === null || value === undefined) {
       throw new TypeError('measurements.value é obrigatório (REAL NOT NULL)');
     }
     return getDatabase()
       .prepare(
-        `INSERT INTO measurements (data_source_id, timestamp, value, payload)
-         VALUES (?, ?, ?, ?)`
+        `INSERT INTO measurements (data_source_id, metric, timestamp, value, payload)
+         VALUES (?, ?, ?, ?, ?)`
       )
       .run(
         dataSourceId,
+        metric,
         timestamp ?? new Date().toISOString(),
         value,
         payload === null ? null : JSON.stringify(payload)
@@ -334,15 +335,28 @@ const dataSources = {
       );
     return this.findById(result.lastInsertRowid);
   },
-  update({ id, name, type, topic = null, samplingIntervalSeconds = 600, storeHistory = 1, active = 1, updatedBy = null }) {
+  update({ id, name, type, topic = null, samplingIntervalSeconds = 600, storeHistory = 1, active = 1, configuration, updatedBy = null }) {
+    const fields = ['name = ?', 'type = ?', 'topic = ?', 'sampling_interval_seconds = ?', 'store_history = ?', 'active = ?'];
+    const params = [name, type, topic, samplingIntervalSeconds, storeHistory ? 1 : 0, active ? 1 : 0];
+    if (configuration !== undefined) {
+      fields.push('configuration = ?');
+      params.push(configuration === null ? null : JSON.stringify(configuration));
+    }
+    fields.push("updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')", 'updated_by = ?');
+    params.push(updatedBy, id);
+    getDatabase()
+      .prepare(`UPDATE data_sources SET ${fields.join(', ')} WHERE id = ?`)
+      .run(...params);
+    return this.findById(id);
+  },
+  updateConfiguration({ id, configuration, updatedBy = null }) {
     getDatabase()
       .prepare(
         `UPDATE data_sources
-         SET name = ?, type = ?, topic = ?, sampling_interval_seconds = ?, store_history = ?, active = ?,
-             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), updated_by = ?
+         SET configuration = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), updated_by = ?
          WHERE id = ?`
       )
-      .run(name, type, topic, samplingIntervalSeconds, storeHistory ? 1 : 0, active ? 1 : 0, updatedBy, id);
+      .run(configuration === null ? null : JSON.stringify(configuration), updatedBy, id);
     return this.findById(id);
   },
   remove(id) {

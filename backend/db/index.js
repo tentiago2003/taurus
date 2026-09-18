@@ -33,6 +33,7 @@ function initDatabase() {
   seedProfiles(db);
   migrateSystemSettings(db);
   migrateRawMessages(db);
+  migrateMeasurements(db);
   seedSystemSettings(db);
 
   return db;
@@ -76,6 +77,18 @@ function migrateRawMessages(database) {
     CREATE INDEX IF NOT EXISTS idx_raw_messages_source_received
       ON raw_messages(data_source_id, received_at);
   `);
+}
+
+
+/** Migração idempotente: adiciona a identificação da métrica a medições existentes. */
+function migrateMeasurements(database) {
+  const columns = database.prepare('PRAGMA table_info(measurements)').all();
+  const hasMetric = columns.some((column) => column.name === 'metric');
+  if (!hasMetric) {
+    database.exec(
+      "ALTER TABLE measurements ADD COLUMN metric TEXT NOT NULL DEFAULT 'value'"
+    );
+  }
 }
 
 /** Retorna a instância aberta do banco; inicializa se necessário. */

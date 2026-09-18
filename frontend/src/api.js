@@ -171,3 +171,22 @@ export function fetchRawMessages({ dataSourceId = null, topic = '', from = '', t
   params.set('pageSize', pageSize)
   return request(`/raw-messages?${params.toString()}`)
 }
+
+
+export function fetchInterpretation(dataSourceId) {
+  return request(`/data-sources/${dataSourceId}/interpretation`)
+}
+
+export function updateInterpretation(dataSourceId, interpretation) {
+  return request(`/data-sources/${dataSourceId}/interpretation`, {
+    method: 'PUT',
+    body: JSON.stringify({ interpretation }),
+  })
+}
+
+export function testInterpretation(dataSourceId, { payload, interpretation }) {
+  return request(`/data-sources/${dataSourceId}/interpretation/test`, {
+    method: 'POST',
+    body: JSON.stringify({ payload, interpretation }),
+  })
+}

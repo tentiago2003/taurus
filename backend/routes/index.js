@@ -9,6 +9,7 @@ const widgetsRoutes = require('./widgets.routes');
 const authRoutes = require('./auth.routes');
 const systemSettingsRoutes = require('./systemSettings.routes');
 const rawMessagesRoutes = require('./rawMessages.routes');
+const interpretationRoutes = require('./interpretation.routes');
 
 const router = new Router();
 
@@ -23,6 +24,7 @@ for (const routes of [
   authRoutes,
   systemSettingsRoutes,
   rawMessagesRoutes,
+  interpretationRoutes,
 ]) {
   routes.register(router);
 }

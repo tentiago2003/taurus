@@ -27,6 +27,9 @@ import {
   updateSystemSettings,
   fetchRawMessages,
   fetchDataSources,
+  fetchInterpretation,
+  updateInterpretation,
+  testInterpretation,
 } from './api'
 
 const formatBuildTime = (isoString) => {
@@ -1554,6 +1557,390 @@ function RawMessagesPage() {
   )
 }
 
+
+function InterpretationPage({ currentUser }) {
+  const [companies, setCompanies] = useState([])
+  const [connections, setConnections] = useState([])
+  const [dataSources, setDataSources] = useState([])
+  const [selectedCompany, setSelectedCompany] = useState('')
+  const [selectedConnection, setSelectedConnection] = useState('')
+  const [selectedDataSource, setSelectedDataSource] = useState('')
+  const [format, setFormat] = useState('json')
+  const [timestampPath, setTimestampPath] = useState('ts')
+  const [mappings, setMappings] = useState([])
+  const [payload, setPayload] = useState('')
+  const [result, setResult] = useState(null)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+
+  const isAdmin = currentUser?.profile_name === 'Admin'
+
+  const parsePath = (text) => {
+    const value = text.trim()
+    if (!value) return null
+    const parts = []
+    const pattern = /([^[.\]]+)|\[(\d+)\]/g
+    let match
+    let consumed = ''
+    while ((match = pattern.exec(value)) !== null) {
+      consumed += match[0]
+      parts.push(match[2] !== undefined ? Number(match[2]) : match[1])
+    }
+    if (consumed.replace(/\s+/g, '') !== value.replace(/\s+/g, '')) {
+      throw new Error(`Caminho inválido: ${text}`)
+    }
+    return parts
+  }
+
+  const formatPath = (path) => {
+    if (!Array.isArray(path)) return ''
+    return path.reduce((result, part) => {
+      if (typeof part === 'number') return `${result}[${part}]`
+      return result ? `${result}.${part}` : part
+    }, '')
+  }
+
+  const configuration = () => ({
+    version: 1,
+    format,
+    timestamp: timestampPath.trim() ? { path: parsePath(timestampPath) } : null,
+    mappings: mappings.map((mapping) => ({
+      metric: mapping.metric.trim(),
+      path: parsePath(mapping.path),
+      transform: mapping.transform === 'none'
+        ? { type: 'none' }
+        : { type: mapping.transform, value: Number(mapping.value) },
+    })),
+  })
+
+  const loadStructure = async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const [companyResult, connectionResult] = await Promise.all([
+        fetchCompanies(),
+        fetchConnections(),
+      ])
+
+      const activeCompanies = companyResult.filter((company) => company.active)
+      const activeConnections = connectionResult.filter((connection) => connection.active)
+      setCompanies(activeCompanies)
+      setConnections(activeConnections)
+
+      if (isAdmin) {
+        setSelectedCompany(activeCompanies.length ? String(activeCompanies[0].id) : '')
+      } else if (currentUser?.company_id) {
+        setSelectedCompany(String(currentUser.company_id))
+      }
+    } catch (err) {
+      setError(err.message || 'Não foi possível carregar empresas e conexões.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadStructure()
+  }, [currentUser?.id, currentUser?.company_id, currentUser?.profile_name])
+
+  const companyConnections = connections.filter((connection) => String(connection.company_id) === String(selectedCompany))
+
+  useEffect(() => {
+    setSelectedConnection('')
+    setSelectedDataSource('')
+    setDataSources([])
+    setResult(null)
+    setError('')
+    setSuccess('')
+    if (companyConnections.length) {
+      setSelectedConnection(String(companyConnections[0].id))
+    }
+  }, [selectedCompany])
+
+  const selectedConnectionData = connections.find((connection) => String(connection.id) === String(selectedConnection))
+
+  useEffect(() => {
+    const sources = (selectedConnectionData?.dataSources || []).filter((source) => source.active)
+    setDataSources(sources)
+    setSelectedDataSource(sources.length ? String(sources[0].id) : '')
+    setResult(null)
+    setError('')
+    setSuccess('')
+  }, [selectedConnection])
+
+  useEffect(() => {
+    if (!selectedDataSource) {
+      setPayload('')
+      setMappings([])
+      setFormat('json')
+      setTimestampPath('ts')
+      return
+    }
+
+    setError('')
+    setSuccess('')
+    setResult(null)
+    Promise.all([
+      fetchInterpretation(selectedDataSource),
+      fetchRawMessages({ dataSourceId: selectedDataSource, page: 1, pageSize: 1 }),
+    ]).then(([configResult, rawResult]) => {
+      const config = configResult.interpretation
+      if (config) {
+        setFormat(config.format || 'json')
+        setTimestampPath(formatPath(config.timestamp?.path))
+        setMappings((config.mappings || []).map((mapping) => ({
+          metric: mapping.metric,
+          path: formatPath(mapping.path),
+          transform: mapping.transform?.type || 'none',
+          value: mapping.transform?.value ?? 1,
+        })))
+      } else {
+        setFormat('json')
+        setTimestampPath('ts')
+        setMappings([])
+      }
+      const latest = rawResult.rows?.[0]
+      setPayload(latest?.payload_text || '')
+    }).catch((err) => setError(err.message || 'Não foi possível carregar a configuração.'))
+  }, [selectedDataSource])
+
+  const addMapping = () => {
+    setMappings((current) => [...current, { metric: '', path: '', transform: 'none', value: 1 }])
+  }
+
+  const updateMapping = (index, field, value) => {
+    setMappings((current) => current.map((item, itemIndex) => (
+      itemIndex === index ? { ...item, [field]: value } : item
+    )))
+  }
+
+  const removeMapping = (index) => {
+    setMappings((current) => current.filter((_, itemIndex) => itemIndex !== index))
+  }
+
+  const buildConfiguration = () => {
+    const config = configuration()
+    if (!config.mappings.length) throw new Error('Adicione pelo menos uma métrica.')
+    config.mappings.forEach((mapping, index) => {
+      if (!mapping.metric) throw new Error(`Informe a métrica da regra ${index + 1}.`)
+      if (!mapping.path) throw new Error(`Informe o caminho da regra ${index + 1}.`)
+      if (mapping.transform.type !== 'none' && !Number.isFinite(mapping.transform.value)) {
+        throw new Error(`Informe um valor de transformação válido na regra ${index + 1}.`)
+      }
+    })
+    return config
+  }
+
+  const handleTest = async () => {
+    setError('')
+    setSuccess('')
+    setResult(null)
+    setBusy(true)
+    try {
+      if (!selectedDataSource) throw new Error('Selecione uma fonte de dados.')
+      if (!payload.trim()) throw new Error('Informe ou carregue uma mensagem para testar.')
+      const config = buildConfiguration()
+      setResult(await testInterpretation(selectedDataSource, { payload, interpretation: config }))
+    } catch (err) {
+      setError(err.message || 'Não foi possível testar a interpretação.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleSave = async () => {
+    setError('')
+    setSuccess('')
+    setResult(null)
+    setBusy(true)
+    try {
+      const config = buildConfiguration()
+      await updateInterpretation(selectedDataSource, config)
+      setSuccess('Interpretação salva com sucesso.')
+    } catch (err) {
+      setError(err.message || 'Não foi possível salvar a interpretação.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const selectedCompanyData = companies.find((company) => String(company.id) === String(selectedCompany))
+
+  if (loading) {
+    return <div className="page-content"><h2>Interpretação</h2><div className="empty-state"><p>Carregando...</p></div></div>
+  }
+
+  return (
+    <div className="page-content interpretation-page">
+      <div className="raw-messages-header">
+        <div>
+          <h2>Interpretação de Dados</h2>
+          <p className="page-description">Configure como uma mensagem bruta deve ser transformada em medições.</p>
+        </div>
+      </div>
+
+      <section className="interpretation-card">
+        <div className="interpretation-hierarchy">
+          <div className="interpretation-hierarchy-step">
+            <span className="interpretation-step-number">1</span>
+            <div className="form-group">
+              <label htmlFor="interpretation-company">Empresa</label>
+              {isAdmin ? (
+                <select id="interpretation-company" value={selectedCompany} onChange={(event) => setSelectedCompany(event.target.value)}>
+                  <option value="">Selecione...</option>
+                  {companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
+                </select>
+              ) : (
+                <div className="interpretation-fixed-selection">
+                  {selectedCompanyData?.name || 'Empresa do usuário'}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="interpretation-hierarchy-step">
+            <span className="interpretation-step-number">2</span>
+            <div className="form-group">
+              <label htmlFor="interpretation-connection">Conexão</label>
+              <select id="interpretation-connection" value={selectedConnection} onChange={(event) => setSelectedConnection(event.target.value)} disabled={!selectedCompany}>
+                <option value="">Selecione...</option>
+                {companyConnections.map((connection) => <option key={connection.id} value={connection.id}>{connection.name} — {connection.type}</option>)}
+              </select>
+              {!selectedCompany && <small>Selecione uma empresa primeiro.</small>}
+              {selectedCompany && !companyConnections.length && <small>Nenhuma conexão ativa nesta empresa.</small>}
+            </div>
+          </div>
+
+          <div className="interpretation-hierarchy-step">
+            <span className="interpretation-step-number">3</span>
+            <div className="form-group">
+              <label htmlFor="interpretation-source">Fonte de dados</label>
+              <select id="interpretation-source" value={selectedDataSource} onChange={(event) => setSelectedDataSource(event.target.value)} disabled={!selectedConnection}>
+                <option value="">Selecione...</option>
+                {dataSources.map((source) => <option key={source.id} value={source.id}>{source.name}{source.topic ? ` — ${source.topic}` : ''}</option>)}
+              </select>
+              {!selectedConnection && <small>Selecione uma conexão primeiro.</small>}
+              {selectedConnection && !dataSources.length && <small>Nenhuma fonte de dados ativa nesta conexão.</small>}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="interpretation-card">
+        <div className="interpretation-grid">
+          <div className="form-group">
+            <label htmlFor="interpretation-format">Formato</label>
+            <select id="interpretation-format" value={format} onChange={(event) => setFormat(event.target.value)}>
+              <option value="json">JSON</option>
+            </select>
+          </div>
+          <div className="form-group interpretation-timestamp-field">
+            <label htmlFor="interpretation-timestamp">Caminho do timestamp</label>
+            <input id="interpretation-timestamp" value={timestampPath} onChange={(event) => setTimestampPath(event.target.value)} placeholder="ts ou data.timestamp" disabled={!selectedDataSource} />
+            <small>Use pontos para objetos e [n] para índices de arrays.</small>
+          </div>
+        </div>
+      </section>
+
+      <section className="interpretation-card">
+        <div className="interpretation-section-header">
+          <div>
+            <h3>Regras de medição</h3>
+            <p>Mapeie cada campo da mensagem para uma métrica numérica.</p>
+          </div>
+          <button className="btn-small" type="button" onClick={addMapping} disabled={!selectedDataSource}>Adicionar métrica</button>
+        </div>
+
+        {mappings.length === 0 ? (
+          <div className="empty-state"><p>{selectedDataSource ? 'Nenhuma regra configurada.' : 'Selecione uma fonte de dados para configurar as regras.'}</p></div>
+        ) : (
+          <div className="interpretation-mappings">
+            {mappings.map((mapping, index) => (
+              <div className="interpretation-mapping" key={index}>
+                <div className="form-group">
+                  <label>Métrica</label>
+                  <input value={mapping.metric} onChange={(event) => updateMapping(index, 'metric', event.target.value)} placeholder="Ex.: temperature_1" />
+                </div>
+                <div className="form-group">
+                  <label>Caminho do campo</label>
+                  <input value={mapping.path} onChange={(event) => updateMapping(index, 'path', event.target.value)} placeholder="Ex.: values[1]" />
+                </div>
+                <div className="form-group">
+                  <label>Transformação</label>
+                  <select value={mapping.transform} onChange={(event) => updateMapping(index, 'transform', event.target.value)}>
+                    <option value="none">Nenhuma</option>
+                    <option value="divide">Dividir</option>
+                    <option value="multiply">Multiplicar</option>
+                    <option value="add">Somar</option>
+                    <option value="subtract">Subtrair</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Valor</label>
+                  <input type="number" step="any" value={mapping.value} disabled={mapping.transform === 'none'} onChange={(event) => updateMapping(index, 'value', event.target.value)} />
+                </div>
+                <button className="btn-small danger" type="button" onClick={() => removeMapping(index)}>Remover</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="interpretation-card">
+        <div className="interpretation-section-header">
+          <div>
+            <h3>Mensagem para teste</h3>
+            <p>A tela carrega automaticamente a última mensagem bruta da fonte selecionada, quando disponível.</p>
+          </div>
+          <button className="btn-small" type="button" disabled={!selectedDataSource} onClick={async () => {
+            try {
+              const raw = await fetchRawMessages({ dataSourceId: selectedDataSource, page: 1, pageSize: 1 })
+              if (raw.rows?.[0]?.payload_text) setPayload(raw.rows[0].payload_text)
+              else setError('Nenhuma mensagem bruta disponível para esta fonte.')
+            } catch (err) {
+              setError(err.message || 'Não foi possível carregar a última mensagem.')
+            }
+          }}>Carregar última</button>
+        </div>
+        <textarea className="interpretation-payload" value={payload} onChange={(event) => setPayload(event.target.value)} rows="9" spellCheck="false" disabled={!selectedDataSource} />
+      </section>
+
+      {error && <div className="test-status error"><p>{error}</p></div>}
+      {success && <div className="test-status success"><p>{success}</p></div>}
+
+      <div className="interpretation-actions">
+        <button className="btn-small" type="button" onClick={handleTest} disabled={busy || !selectedDataSource}>Testar interpretação</button>
+        <button className="btn-test" type="button" onClick={handleSave} disabled={busy || !selectedDataSource}>Salvar interpretação</button>
+      </div>
+
+      {result && (
+        <section className="interpretation-result">
+          <h3>Resultado do teste</h3>
+          <div className="interpretation-result-grid">
+            <div>
+              <h4>Measurements geradas</h4>
+              {result.measurements?.length ? (
+                <table className="slaves-table">
+                  <thead><tr><th>Métrica</th><th>Timestamp</th><th>Valor</th></tr></thead>
+                  <tbody>{result.measurements.map((item, index) => <tr key={index}><td>{item.metric}</td><td>{item.timestamp}</td><td>{item.value}</td></tr>)}</tbody>
+                </table>
+              ) : <div className="empty-state"><p>Nenhuma Measurement foi gerada.</p></div>}
+            </div>
+            <div>
+              <h4>Erros</h4>
+              {result.errors?.length ? (
+                <ul>{result.errors.map((item, index) => <li key={index}><strong>{item.metric}:</strong> {item.reason}</li>)}</ul>
+              ) : <p>Nenhum erro.</p>}
+            </div>
+          </div>
+        </section>
+      )}
+    </div>
+  )
+}
+
 function AboutPage() {
   return (
     <div className="page-content">
@@ -1882,6 +2269,12 @@ function App() {
               Mensagens Brutas
             </button>
             <button
+              className={`nav-item ${currentPage === 'interpretation' ? 'active' : ''}`}
+              onClick={() => handlePageChange('interpretation')}
+            >
+              Interpretação
+            </button>
+            <button
               className={`nav-item ${currentPage === 'companies' ? 'active' : ''}`}
               onClick={() => handlePageChange('companies')}
             >
@@ -1918,6 +2311,7 @@ function App() {
             <ConnectionPage isTestActive={mqttTestSession.isOpen} onStartTest={startMqttTest} runtimeStatuses={connectionStatuses} />
           )}
           {currentPage === 'raw-messages' && <RawMessagesPage />}
+          {currentPage === 'interpretation' && <InterpretationPage currentUser={currentUser} />}
           {currentPage === 'companies' && <CompaniesPage />}
           {currentPage === 'users' && <UsersPage />}
           {currentPage === 'system-settings' && currentUser.profile_name === 'Admin' && <SystemSettingsPage />}
