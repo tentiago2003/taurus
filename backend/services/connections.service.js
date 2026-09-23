@@ -25,11 +25,13 @@ function normalizeTopics(topics) {
     throw new ApiError(400, 'Informe pelo menos um tópico MQTT.');
   }
 
+  const defaultSamplingIntervalSeconds = repository.systemSettings.get().default_sampling_interval_seconds;
+
   const normalized = topics.map((topic, index) => ({
     id: topic.id === undefined || topic.id === null || topic.id === '' ? null : requireInt(topic.id, `topics[${index}].id`),
     name: requireString(topic.name, `topics[${index}].name`),
     topic: requireString(topic.topic, `topics[${index}].topic`),
-    samplingIntervalSeconds: optionalInt(topic.samplingIntervalSeconds) ?? 600,
+    samplingIntervalSeconds: optionalInt(topic.samplingIntervalSeconds) ?? defaultSamplingIntervalSeconds,
     storeHistory: topic.storeHistory === undefined ? 1 : topic.storeHistory ? 1 : 0,
     active: topic.active === undefined ? 1 : topic.active ? 1 : 0,
   }));

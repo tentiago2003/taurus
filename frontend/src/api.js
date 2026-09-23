@@ -161,6 +161,18 @@ export function updateSystemSettings(data) {
 }
 
 
+
+export function fetchMeasurements({ dataSourceId = null, metric = '', from = '', to = '', page = 1, pageSize = 50 } = {}) {
+  const params = new URLSearchParams()
+  if (dataSourceId !== null && dataSourceId !== undefined && dataSourceId !== '') params.set('dataSourceId', dataSourceId)
+  if (metric) params.set('metric', metric)
+  if (from) params.set('from', from)
+  if (to) params.set('to', to)
+  params.set('page', page)
+  params.set('pageSize', pageSize)
+  return request(`/measurements?${params.toString()}`)
+}
+
 export function fetchRawMessages({ dataSourceId = null, topic = '', from = '', to = '', page = 1, pageSize = 50 } = {}) {
   const params = new URLSearchParams()
   if (dataSourceId !== null && dataSourceId !== undefined && dataSourceId !== '') params.set('dataSourceId', dataSourceId)

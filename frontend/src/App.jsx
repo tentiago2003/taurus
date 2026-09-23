@@ -26,6 +26,7 @@ import {
   fetchSystemSettings,
   updateSystemSettings,
   fetchRawMessages,
+  fetchMeasurements,
   fetchDataSources,
   fetchInterpretation,
   updateInterpretation,
@@ -855,7 +856,8 @@ function runtimeLabel(status) {
 }
 
 function ConnectionPage({ isTestActive, onStartTest, runtimeStatuses }) {
-  const emptyTopic = () => ({ id: null, name: '', topic: '', samplingIntervalSeconds: 600, storeHistory: true, active: true })
+  const [defaultSamplingIntervalSeconds, setDefaultSamplingIntervalSeconds] = useState(null)
+  const emptyTopic = () => ({ id: null, name: '', topic: '', samplingIntervalSeconds: defaultSamplingIntervalSeconds ?? '', storeHistory: true, active: true })
   const emptyForm = () => ({ id: null, companyId: '', name: '', type: 'MQTT', host: '', port: '', username: '', password: '', topics: [emptyTopic()] })
   const [connections, setConnections] = useState([])
   const [companies, setCompanies] = useState([])
@@ -879,9 +881,10 @@ function ConnectionPage({ isTestActive, onStartTest, runtimeStatuses }) {
     setIsLoading(true)
     setLoadError('')
     try {
-      const [connectionData, companyData] = await Promise.all([fetchConnections(), fetchCompanies()])
+      const [connectionData, companyData, systemSettings] = await Promise.all([fetchConnections(), fetchCompanies(), fetchSystemSettings()])
       setConnections(connectionData)
       setCompanies(companyData)
+      setDefaultSamplingIntervalSeconds(systemSettings.default_sampling_interval_seconds)
     } catch (err) {
       setLoadError(err.message || 'Não foi possível carregar as conexões.')
     } finally {
@@ -915,7 +918,7 @@ function ConnectionPage({ isTestActive, onStartTest, runtimeStatuses }) {
         id: source.id,
         name: source.name,
         topic: source.topic || '',
-        samplingIntervalSeconds: source.sampling_interval_seconds || 600,
+        samplingIntervalSeconds: source.sampling_interval_seconds ?? defaultSamplingIntervalSeconds ?? '',
         storeHistory: Boolean(source.store_history),
         active: Boolean(source.active),
       })),
@@ -989,7 +992,7 @@ function ConnectionPage({ isTestActive, onStartTest, runtimeStatuses }) {
           id: topic.id,
           name: topic.name.trim(),
           topic: topic.topic.trim(),
-          samplingIntervalSeconds: Number(topic.samplingIntervalSeconds) || 600,
+          samplingIntervalSeconds: Number(topic.samplingIntervalSeconds),
           storeHistory: Boolean(topic.storeHistory),
           active: Boolean(topic.active),
         })),
@@ -1557,6 +1560,172 @@ function RawMessagesPage() {
   )
 }
 
+
+
+function MeasurementsPage() {
+  const [measurements, setMeasurements] = useState([])
+  const [dataSources, setDataSources] = useState([])
+  const [selectedDataSource, setSelectedDataSource] = useState('')
+  const [metric, setMetric] = useState('')
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(50)
+  const [pagination, setPagination] = useState({ total: 0, totalPages: 1 })
+  const [isLoading, setIsLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [lastRefresh, setLastRefresh] = useState(null)
+
+  const toStartOfDayIso = (value) => value ? new Date(`${value}T00:00:00`).toISOString() : ''
+  const toEndOfDayIso = (value) => value ? new Date(`${value}T23:59:59.999`).toISOString() : ''
+
+  const loadMeasurements = async ({ silent = false, requestedPage = page } = {}) => {
+    if (!silent) setIsLoading(true)
+    setLoadError('')
+    try {
+      const result = await fetchMeasurements({
+        dataSourceId: selectedDataSource || null,
+        metric: metric.trim(),
+        from: toStartOfDayIso(fromDate),
+        to: toEndOfDayIso(toDate),
+        page: requestedPage,
+        pageSize,
+      })
+      setMeasurements(result.rows || [])
+      setPagination(result)
+      setLastRefresh(new Date())
+    } catch (err) {
+      setLoadError(err.message || 'Não foi possível carregar as medições.')
+    } finally {
+      if (!silent) setIsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchDataSources()
+      .then(setDataSources)
+      .catch((err) => setLoadError(err.message || 'Não foi possível carregar as fontes de dados.'))
+  }, [])
+
+  useEffect(() => {
+    setPage(1)
+  }, [selectedDataSource, metric, fromDate, toDate, pageSize])
+
+  useEffect(() => {
+    loadMeasurements()
+    const timer = setInterval(() => loadMeasurements({ silent: true }), 5000)
+    return () => clearInterval(timer)
+  }, [selectedDataSource, metric, fromDate, toDate, page, pageSize])
+
+  const formatDateTime = (value) => {
+    if (!value) return '-'
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return value
+    return date.toLocaleString('pt-BR')
+  }
+
+  const applyFilters = (event) => {
+    event.preventDefault()
+    setPage(1)
+    loadMeasurements({ requestedPage: 1 })
+  }
+
+  const clearFilters = () => {
+    setSelectedDataSource('')
+    setMetric('')
+    setFromDate('')
+    setToDate('')
+    setPage(1)
+  }
+
+  return (
+    <div className="page-content raw-messages-page">
+      <div className="raw-messages-header">
+        <div>
+          <h2>Medições</h2>
+          <p className="page-description">Visualize as medições efetivamente gravadas após a interpretação e o sampling.</p>
+        </div>
+        <button className="btn-small" onClick={() => loadMeasurements()} disabled={isLoading}>
+          {isLoading ? 'Atualizando...' : 'Atualizar'}
+        </button>
+      </div>
+
+      <form className="raw-messages-toolbar" onSubmit={applyFilters}>
+        <div className="raw-messages-filters">
+          <div className="form-group">
+            <label htmlFor="measurement-source">Fonte de dados</label>
+            <select id="measurement-source" value={selectedDataSource} onChange={(event) => setSelectedDataSource(event.target.value)}>
+              <option value="">Todas as fontes</option>
+              {dataSources.map((source) => <option key={source.id} value={source.id}>{source.name}{source.topic ? ` — ${source.topic}` : ''}</option>)}
+            </select>
+          </div>
+          <div className="form-group">
+            <label htmlFor="measurement-metric">Métrica</label>
+            <input id="measurement-metric" value={metric} onChange={(event) => setMetric(event.target.value)} placeholder="Ex.: temperature_1" />
+          </div>
+          <div className="form-group">
+            <label htmlFor="measurement-from">De</label>
+            <input id="measurement-from" type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} />
+          </div>
+          <div className="form-group">
+            <label htmlFor="measurement-to">Até</label>
+            <input id="measurement-to" type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} />
+          </div>
+          <div className="raw-messages-filter-actions">
+            <button className="btn-test" type="submit">Filtrar</button>
+            <button className="btn-small" type="button" onClick={clearFilters}>Limpar</button>
+          </div>
+        </div>
+        <div className="raw-messages-summary">
+          <strong>{pagination.total || 0}</strong> medição(ões) encontrada(s)
+          {lastRefresh && <span>Atualizado às {lastRefresh.toLocaleTimeString('pt-BR')}</span>}
+        </div>
+      </form>
+
+      {loadError && <div className="test-status error"><p>{loadError}</p></div>}
+      {isLoading && measurements.length === 0 ? (
+        <div className="empty-state"><p>Carregando medições...</p></div>
+      ) : measurements.length === 0 ? (
+        <div className="empty-state"><p>Nenhuma medição foi gravada para os filtros selecionados.</p></div>
+      ) : (
+        <>
+          <div className="raw-messages-list">
+            <div className="table-wrapper">
+              <table className="slaves-table">
+                <thead>
+                  <tr>
+                    <th>Data/Hora</th>
+                    <th>Fonte de dados</th>
+                    <th>Métrica</th>
+                    <th>Valor</th>
+                    <th>Payload</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {measurements.map((item) => (
+                    <tr key={item.id}>
+                      <td>{formatDateTime(item.timestamp)}</td>
+                      <td>{item.data_source_name}</td>
+                      <td>{item.metric}</td>
+                      <td>{item.value}</td>
+                      <td>{item.payload ? JSON.stringify(item.payload) : '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div className="raw-messages-pagination">
+            <button className="btn-small" type="button" disabled={page <= 1 || isLoading} onClick={() => setPage((current) => current - 1)}>Anterior</button>
+            <span>Página {page} de {pagination.totalPages || 1}</span>
+            <button className="btn-small" type="button" disabled={page >= (pagination.totalPages || 1) || isLoading} onClick={() => setPage((current) => current + 1)}>Próxima</button>
+            <label>Por página <select value={pageSize} onChange={(event) => setPageSize(Number(event.target.value))}><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option></select></label>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
 
 function InterpretationPage({ currentUser }) {
   const [companies, setCompanies] = useState([])
@@ -2269,6 +2438,12 @@ function App() {
               Mensagens Brutas
             </button>
             <button
+              className={`nav-item ${currentPage === 'measurements' ? 'active' : ''}`}
+              onClick={() => handlePageChange('measurements')}
+            >
+              Medições
+            </button>
+            <button
               className={`nav-item ${currentPage === 'interpretation' ? 'active' : ''}`}
               onClick={() => handlePageChange('interpretation')}
             >
@@ -2311,6 +2486,7 @@ function App() {
             <ConnectionPage isTestActive={mqttTestSession.isOpen} onStartTest={startMqttTest} runtimeStatuses={connectionStatuses} />
           )}
           {currentPage === 'raw-messages' && <RawMessagesPage />}
+          {currentPage === 'measurements' && <MeasurementsPage />}
           {currentPage === 'interpretation' && <InterpretationPage currentUser={currentUser} />}
           {currentPage === 'companies' && <CompaniesPage />}
           {currentPage === 'users' && <UsersPage />}

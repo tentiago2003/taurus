@@ -1,6 +1,7 @@
 const repository = require('../db/repository');
 const { createMqttConnection } = require('../mqtt/client');
 const rawMessagesService = require('./rawMessages.service');
+const samplingService = require('./sampling.service');
 
 const RECONNECT_PERIOD_MS = 5000;
 const runtime = new Map();
@@ -104,7 +105,24 @@ function start(connectionId) {
     .onRawMessage((payload, topic, receivedAt) => {
       if (runtime.get(connectionId)?.connection !== mqttConnection) return;
       try {
-        rawMessagesService.collect({ connectionId, topic, payload, receivedAt });
+        const rawMessage = rawMessagesService.collect({ connectionId, topic, payload, receivedAt });
+        if (rawMessage) {
+          const dataSource = repository.dataSources.findByConnectionAndTopic(connectionId, topic);
+          if (dataSource) {
+            const samplingResult = samplingService.process({
+              dataSourceId: dataSource.id,
+              payload,
+              receivedAt,
+            });
+            if (samplingResult.errors.length > 0) {
+              logEvent(connectionId, 'INTERPRETATION_WARNING', 'Mensagem recebida com falhas de interpretação.', {
+                topic,
+                dataSourceId: dataSource.id,
+                errors: samplingResult.errors,
+              });
+            }
+          }
+        }
       } catch (error) {
         logEvent(connectionId, 'RAW_MESSAGE_ERROR', `Erro ao armazenar mensagem bruta: ${error.message}`, {
           topic,
@@ -151,6 +169,9 @@ function stop(connectionId, { log = true } = {}) {
   }
   runtime.delete(connectionId);
   entry.connection.disconnect();
+  for (const dataSource of repository.dataSources.listByConnection(connectionId)) {
+    samplingService.flushDataSource(dataSource.id);
+  }
   if (log) logEvent(connectionId, 'DISCONNECTED', 'Conexão encerrada pelo Taurus.');
   emitStatus(connectionId, 'inactive', 'Conexão desativada.');
   return { connectionId, status: 'inactive' };
@@ -197,6 +218,7 @@ function stopAll({ log = false, eventType = 'BACKEND_SHUTDOWN', message = 'Backe
     if (log) logEvent(connectionId, eventType, message);
     stop(connectionId, { log: false });
   }
+  samplingService.flushAll();
 }
 
 function listStatuses() {

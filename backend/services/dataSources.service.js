@@ -11,7 +11,8 @@ function create(payload = {}) {
   const name = requireString(payload.name, 'name');
   const type = requireString(payload.type, 'type');
   const topic = payload.topic ?? null;
-  const samplingIntervalSeconds = optionalInt(payload.samplingIntervalSeconds) ?? 600;
+  const defaultSamplingIntervalSeconds = repository.systemSettings.get().default_sampling_interval_seconds;
+  const samplingIntervalSeconds = optionalInt(payload.samplingIntervalSeconds) ?? defaultSamplingIntervalSeconds;
   const storeHistory = payload.storeHistory === undefined ? 1 : payload.storeHistory ? 1 : 0;
   const configuration = payload.configuration ?? null;
 

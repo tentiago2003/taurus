@@ -49,6 +49,24 @@ test('cria conexão MQTT com seus tópicos', () => {
   assert.equal(connection.dataSources[1].store_history, 0);
 });
 
+test('usa o intervalo padrão do sistema ao criar fonte sem intervalo informado', () => {
+  const company = createCompany('Empresa Conexão Default');
+  repository.systemSettings.update({
+    measurementRetentionDays: 7,
+    defaultSamplingIntervalSeconds: 300,
+  });
+
+  const connection = connectionsService.create({
+    companyId: company.id,
+    name: 'MQTT Default',
+    type: 'MQTT',
+    configuration: { host: 'broker.example.com', port: 1883 },
+    topics: [{ name: 'LoRa Default', topic: 'a/default' }],
+  });
+
+  assert.equal(connection.dataSources[0].sampling_interval_seconds, 300);
+});
+
 test('não permite conexão sem tópico', () => {
   const company = createCompany('Empresa Conexão 2');
   assert.throws(
