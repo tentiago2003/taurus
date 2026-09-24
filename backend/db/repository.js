@@ -10,6 +10,7 @@ const { getDatabase } = require('./index');
  * faz o parse/stringify na fronteira.
  */
 
+
 function parseJson(row, fields = ['configuration', 'payload']) {
   if (!row) {
     return row;
@@ -616,18 +617,38 @@ const connections = {
 
 const dashboards = {
   list() {
-    return getDatabase().prepare('SELECT * FROM dashboards ORDER BY name').all();
+    return getDatabase()
+      .prepare(
+        `SELECT d.*, c.name AS company_name
+         FROM dashboards d
+         JOIN companies c ON c.id = d.company_id
+         ORDER BY d.is_default DESC, d.name`
+      )
+      .all();
   },
   listByCompany(companyId) {
     return getDatabase()
-      .prepare('SELECT * FROM dashboards WHERE company_id = ? ORDER BY name')
+      .prepare('SELECT * FROM dashboards WHERE company_id = ? ORDER BY is_default DESC, name')
       .all(companyId);
   },
   findById(id) {
-    return getDatabase().prepare('SELECT * FROM dashboards WHERE id = ?').get(id);
+    return getDatabase()
+      .prepare(
+        `SELECT d.*, c.name AS company_name
+         FROM dashboards d
+         JOIN companies c ON c.id = d.company_id
+         WHERE d.id = ?`
+      )
+      .get(id);
   },
   create({ companyId, name, description = null, isDefault = 0, createdBy = null }) {
-    const result = getDatabase()
+    const db = getDatabase();
+    if (isDefault) {
+      db.prepare(
+        'UPDATE dashboards SET is_default = 0, updated_at = strftime(\'%Y-%m-%dT%H:%M:%fZ\', \'now\') WHERE company_id = ?'
+      ).run(companyId);
+    }
+    const result = db
       .prepare(
         `INSERT INTO dashboards (company_id, name, description, is_default, created_by, updated_by)
          VALUES (?, ?, ?, ?, ?, ?)`
@@ -635,20 +656,53 @@ const dashboards = {
       .run(companyId, name, description, isDefault ? 1 : 0, createdBy, createdBy);
     return this.findById(result.lastInsertRowid);
   },
+  update({ id, name, description = null, isDefault = 0, updatedBy = null }) {
+    const db = getDatabase();
+    const current = this.findById(id);
+    if (!current) return null;
+    if (isDefault) {
+      db.prepare(
+        'UPDATE dashboards SET is_default = 0, updated_at = strftime(\'%Y-%m-%dT%H:%M:%fZ\', \'now\') WHERE company_id = ? AND id <> ?'
+      ).run(current.company_id, id);
+    }
+    db.prepare(
+      `UPDATE dashboards
+       SET name = ?, description = ?, is_default = ?,
+           updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), updated_by = ?
+       WHERE id = ?`
+    ).run(name, description, isDefault ? 1 : 0, updatedBy, id);
+    return this.findById(id);
+  },
+  remove(id) {
+    return getDatabase().prepare('DELETE FROM dashboards WHERE id = ?').run(id).changes > 0;
+  },
 };
 
 const widgets = {
   list() {
     return getDatabase()
-      .prepare('SELECT * FROM widgets ORDER BY dashboard_id, position')
+      .prepare('SELECT * FROM widgets ORDER BY dashboard_id, position, id')
       .all()
+      .map((row) => parseJson(row));
+  },
+  listByDashboard(dashboardId) {
+    return getDatabase()
+      .prepare('SELECT * FROM widgets WHERE dashboard_id = ? ORDER BY position, id')
+      .all(dashboardId)
       .map((row) => parseJson(row));
   },
   findById(id) {
     return parseJson(getDatabase().prepare('SELECT * FROM widgets WHERE id = ?').get(id));
   },
-  create({ dashboardId, name, type, position = 0, configuration = null, createdBy = null }) {
-    const result = getDatabase()
+  listDataSourceIds(widgetId) {
+    return getDatabase()
+      .prepare('SELECT data_source_id FROM widget_data_sources WHERE widget_id = ? ORDER BY data_source_id')
+      .all(widgetId)
+      .map((row) => row.data_source_id);
+  },
+  create({ dashboardId, name, type, position = 0, configuration = null, dataSourceIds = [], createdBy = null }) {
+    const db = getDatabase();
+    const result = db
       .prepare(
         `INSERT INTO widgets (dashboard_id, name, type, position, configuration, created_by, updated_by)
          VALUES (?, ?, ?, ?, ?, ?, ?)`
@@ -662,10 +716,43 @@ const widgets = {
         createdBy,
         createdBy
       );
-    return this.findById(result.lastInsertRowid);
+    const widgetId = Number(result.lastInsertRowid);
+    const insertDataSource = db.prepare(
+      'INSERT OR IGNORE INTO widget_data_sources (widget_id, data_source_id) VALUES (?, ?)'
+    );
+    for (const dataSourceId of dataSourceIds) {
+      insertDataSource.run(widgetId, dataSourceId);
+    }
+    return this.findById(widgetId);
+  },
+  update({ id, name, type, position = 0, configuration = null, dataSourceIds = [], updatedBy = null }) {
+    const db = getDatabase();
+    db.prepare(
+      `UPDATE widgets
+       SET name = ?, type = ?, position = ?, configuration = ?,
+           updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), updated_by = ?
+       WHERE id = ?`
+    ).run(
+      name,
+      type,
+      position,
+      configuration === null ? null : JSON.stringify(configuration),
+      updatedBy,
+      id
+    );
+    db.prepare('DELETE FROM widget_data_sources WHERE widget_id = ?').run(id);
+    const insertDataSource = db.prepare(
+      'INSERT OR IGNORE INTO widget_data_sources (widget_id, data_source_id) VALUES (?, ?)'
+    );
+    for (const dataSourceId of dataSourceIds) {
+      insertDataSource.run(id, dataSourceId);
+    }
+    return this.findById(id);
+  },
+  remove(id) {
+    return getDatabase().prepare('DELETE FROM widgets WHERE id = ?').run(id).changes > 0;
   },
 };
-
 module.exports = {
   companies,
   profiles,

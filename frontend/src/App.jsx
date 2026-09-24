@@ -31,6 +31,14 @@ import {
   fetchInterpretation,
   updateInterpretation,
   testInterpretation,
+  fetchDashboards,
+  fetchDashboard,
+  createDashboard,
+  updateDashboard,
+  deleteDashboard,
+  createWidget,
+  updateWidget,
+  deleteWidget,
 } from './api'
 
 const formatBuildTime = (isoString) => {
@@ -2137,6 +2145,375 @@ function AboutPage() {
   )
 }
 
+
+const WIDGET_SIZE_OPTIONS = [
+  { value: '1x1', label: 'Pequeno — 1×1' },
+  { value: '2x1', label: 'Largo — 2×1' },
+  { value: '1x2', label: 'Alto — 1×2' },
+  { value: '2x2', label: 'Grande — 2×2' },
+  { value: '2x3', label: 'Grande vertical — 2×3' },
+]
+
+const getDefaultWidgetSize = (type) => {
+  if (type === 'table') return '2x3'
+  if (type === 'chart') return '2x2'
+  return '1x1'
+}
+
+function DashboardWidget({ widget, onEdit, onDelete }) {
+  const data = widget.data || {}
+  const decimals = Number.isInteger(data.decimalPlaces) ? data.decimalPlaces : 1
+  const formatValue = (value) => {
+    if (value === null || value === undefined || Number.isNaN(Number(value))) return '—'
+    return Number(value).toFixed(decimals)
+  }
+  const unit = data.unit || ''
+
+  const chartRows = data.sources?.[0]?.rows || []
+  const values = chartRows.map((row) => Number(row.value)).filter((value) => Number.isFinite(value))
+  const min = values.length ? Math.min(...values) : 0
+  const max = values.length ? Math.max(...values) : 1
+  const range = max - min || 1
+  const width = 620
+  const height = 190
+  const points = chartRows.map((row, index) => {
+    const x = chartRows.length === 1 ? width / 2 : (index / (chartRows.length - 1)) * width
+    const y = height - ((Number(row.value) - min) / range) * (height - 20) - 10
+    return `${x},${y}`
+  }).join(' ')
+
+  return (
+    <section className={`dashboard-widget widget-${widget.type} widget-size-${data.size || getDefaultWidgetSize(widget.type)}`}>
+      <div className="dashboard-widget-header">
+        <div>
+          <h3>{widget.name}</h3>
+          <span>{data.metric || 'value'}{unit ? ` · ${unit}` : ''}</span>
+        </div>
+        <div className="dashboard-widget-actions">
+          <button className="btn-small" onClick={() => onEdit(widget)}>Editar</button>
+          <button className="btn-small danger" onClick={() => onDelete(widget)}>Excluir</button>
+        </div>
+      </div>
+
+      {widget.type === 'value' && (
+        <div className="dashboard-value-body">
+          {data.sources?.length ? data.sources.map((source) => (
+            <div className="dashboard-value-item" key={source.dataSourceId}>
+              <small>{source.dataSourceName}</small>
+              <strong>{formatValue(source.latest?.value)} <em>{unit}</em></strong>
+              <span>{source.latest?.timestamp ? new Date(source.latest.timestamp).toLocaleString('pt-BR') : 'Sem medição'}</span>
+            </div>
+          )) : <div className="empty-state"><p>Sem Data Source vinculada.</p></div>}
+        </div>
+      )}
+
+      {widget.type === 'chart' && (
+        <div className="dashboard-chart-body">
+          {chartRows.length ? (
+            <>
+              <svg className="dashboard-chart" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label={`Gráfico de ${widget.name}`}>
+                <polyline points={points} fill="none" stroke="currentColor" strokeWidth="3" vectorEffect="non-scaling-stroke" />
+                {chartRows.map((row, index) => {
+                  if (index !== 0 && index !== chartRows.length - 1 && index % Math.max(1, Math.floor(chartRows.length / 5)) !== 0) return null
+                  const x = chartRows.length === 1 ? width / 2 : (index / (chartRows.length - 1)) * width
+                  const y = height - ((Number(row.value) - min) / range) * (height - 20) - 10
+                  return <circle key={`${row.id}-${index}`} cx={x} cy={y} r="4" fill="currentColor" />
+                })}
+              </svg>
+              <div className="dashboard-chart-meta">
+                <span>mín. {formatValue(min)} {unit}</span>
+                <span>máx. {formatValue(max)} {unit}</span>
+                <span>{chartRows.length} pontos</span>
+              </div>
+            </>
+          ) : <div className="empty-state"><p>Sem medições no período configurado.</p></div>}
+        </div>
+      )}
+
+      {widget.type === 'table' && (
+        <div className="dashboard-table-wrap">
+          <table className="slaves-table dashboard-data-table">
+            <thead><tr><th>Data/Hora</th><th>Data Source</th><th>Valor</th></tr></thead>
+            <tbody>
+              {(data.sources || []).flatMap((source) =>
+                (source.rows || []).map((row) => (
+                  <tr key={`${source.dataSourceId}-${row.id}`}>
+                    <td>{new Date(row.timestamp).toLocaleString('pt-BR')}</td>
+                    <td>{source.dataSourceName}</td>
+                    <td>{formatValue(row.value)} {unit}</td>
+                  </tr>
+                ))
+              ).slice(0, 50)}
+              {!data.sources?.some((source) => source.rows?.length) && <tr><td colSpan="3">Sem medições.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  )
+}
+
+function DashboardPage() {
+  const [dashboards, setDashboards] = useState([])
+  const [companies, setCompanies] = useState([])
+  const [dataSources, setDataSources] = useState([])
+  const [selectedId, setSelectedId] = useState(null)
+  const [dashboard, setDashboard] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [showDashboardForm, setShowDashboardForm] = useState(false)
+  const [showWidgetForm, setShowWidgetForm] = useState(false)
+  const [editingWidget, setEditingWidget] = useState(null)
+  const [dashboardForm, setDashboardForm] = useState({ name: '', description: '', companyId: '', isDefault: false })
+  const [widgetForm, setWidgetForm] = useState({
+    name: '', type: 'value', dataSourceId: '', metric: 'temperature_1', unit: '°C', decimalPlaces: 1, periodHours: 24,
+  })
+  const [busy, setBusy] = useState(false)
+  const [widgetValidationError, setWidgetValidationError] = useState('')
+  const widgetNameRef = useRef(null)
+
+
+  const loadDashboards = async (preferredId = null) => {
+    setLoading(true)
+    setError('')
+    try {
+      const [list, companyList, sourceList] = await Promise.all([
+        fetchDashboards(), fetchCompanies(), fetchDataSources(),
+      ])
+      setDashboards(list)
+      setCompanies(companyList)
+      setDataSources(sourceList)
+      const id = preferredId || selectedId || list.find((item) => item.is_default)?.id || list[0]?.id || null
+      setSelectedId(id)
+    } catch (err) {
+      setError(err.message || 'Não foi possível carregar os dashboards.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const loadDashboard = async (id = selectedId) => {
+    if (!id) {
+      setDashboard(null)
+      return
+    }
+    try {
+      setDashboard(await fetchDashboard(id))
+    } catch (err) {
+      setError(err.message || 'Não foi possível carregar o dashboard.')
+    }
+  }
+
+  useEffect(() => { loadDashboards() }, [])
+  useEffect(() => { if (selectedId) loadDashboard(selectedId) }, [selectedId])
+
+  useEffect(() => {
+    if (!selectedId) return
+    const timer = setInterval(() => loadDashboard(selectedId), 5000)
+    return () => clearInterval(timer)
+  }, [selectedId])
+
+  const resetWidgetForm = () => {
+    setWidgetForm({ name: '', type: 'value', dataSourceId: dataSources[0]?.id?.toString() || '', metric: 'temperature_1', unit: '°C', decimalPlaces: 1, periodHours: 24, size: '1x1' })
+    setWidgetValidationError('')
+    setEditingWidget(null)
+    setShowWidgetForm(false)
+  }
+
+  const openNewWidget = () => {
+    setEditingWidget(null)
+    setWidgetValidationError('')
+    setWidgetForm({
+      name: '',
+      type: 'value',
+      dataSourceId: dataSources[0]?.id?.toString() || '',
+      metric: 'temperature_1',
+      unit: '°C',
+      decimalPlaces: 1,
+      periodHours: 24,
+      size: '1x1',
+    })
+    setShowWidgetForm(true)
+  }
+
+  const openEditWidget = (widget) => {
+    const cfg = widget.configuration || {}
+    setEditingWidget(widget)
+    setWidgetForm({
+      name: widget.name,
+      type: widget.type,
+      dataSourceId: String(widget.data_source_ids?.[0] || ''),
+      metric: cfg.metric || 'value',
+      unit: cfg.unit || '',
+      decimalPlaces: cfg.decimal_places ?? 1,
+      periodHours: cfg.period_hours ?? 24,
+      size: cfg.size || getDefaultWidgetSize(widget.type),
+    })
+    setShowWidgetForm(true)
+  }
+
+  const handleDashboardSubmit = async (event) => {
+    event.preventDefault()
+    if (!dashboardForm.name.trim() || !dashboardForm.companyId) return
+    setBusy(true); setError('')
+    try {
+      const created = await createDashboard({
+        companyId: Number(dashboardForm.companyId),
+        name: dashboardForm.name.trim(),
+        description: dashboardForm.description.trim() || null,
+        isDefault: dashboardForm.isDefault,
+      })
+      setShowDashboardForm(false)
+      setDashboardForm({ name: '', description: '', companyId: '', isDefault: false })
+      await loadDashboards(created.id)
+    } catch (err) {
+      setError(err.message || 'Não foi possível criar o dashboard.')
+    } finally { setBusy(false) }
+  }
+
+  const handleDashboardDelete = async () => {
+    if (!dashboard || !window.confirm(`Excluir o dashboard "${dashboard.name}"? Os dados históricos não serão apagados.`)) return
+    setBusy(true)
+    try {
+      await deleteDashboard(dashboard.id)
+      setSelectedId(null); setDashboard(null)
+      await loadDashboards()
+    } catch (err) { setError(err.message || 'Não foi possível excluir o dashboard.') }
+    finally { setBusy(false) }
+  }
+
+  const handleWidgetSubmit = async (event) => {
+    event.preventDefault()
+    if (!dashboard) return
+    if (!widgetForm.name.trim()) {
+      setWidgetValidationError('Informe um nome para o widget.')
+      requestAnimationFrame(() => widgetNameRef.current?.focus())
+      return
+    }
+    if (!widgetForm.dataSourceId) {
+      setWidgetValidationError('Selecione uma Data Source.')
+      return
+    }
+    if (!widgetForm.metric.trim()) {
+      setWidgetValidationError('Informe uma métrica.')
+      return
+    }
+    setWidgetValidationError('')
+    setBusy(true); setError('')
+    const payload = {
+      dashboardId: dashboard.id,
+      name: widgetForm.name.trim(),
+      type: widgetForm.type,
+      position: editingWidget?.position ?? (dashboard.widgets?.length || 0),
+      dataSourceIds: [Number(widgetForm.dataSourceId)],
+      configuration: {
+        metric: widgetForm.metric.trim(),
+        unit: widgetForm.unit.trim(),
+        decimal_places: Number(widgetForm.decimalPlaces) || 0,
+        period_hours: Number(widgetForm.periodHours) || 24,
+        size: widgetForm.size || getDefaultWidgetSize(widgetForm.type),
+      },
+    }
+    try {
+      if (editingWidget) await updateWidget(editingWidget.id, payload)
+      else await createWidget(payload)
+      resetWidgetForm()
+      await loadDashboard(dashboard.id)
+    } catch (err) { setError(err.message || 'Não foi possível salvar o widget.') }
+    finally { setBusy(false) }
+  }
+
+  const handleWidgetDelete = async (widget) => {
+    if (!window.confirm(`Excluir o widget "${widget.name}"? As medições serão preservadas.`)) return
+    setBusy(true)
+    try { await deleteWidget(widget.id); await loadDashboard(dashboard.id) }
+    catch (err) { setError(err.message || 'Não foi possível excluir o widget.') }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <div className="page-content dashboard-page">
+      <div className="dashboard-page-header">
+        <div>
+          <h2>Dashboards</h2>
+          <p className="page-description">Painéis de visualização construídos sobre as Measurements.</p>
+        </div>
+        <button className="btn-test" onClick={() => {
+          setDashboardForm({ name: '', description: '', companyId: String(companies[0]?.id || ''), isDefault: dashboards.length === 0 })
+          setShowDashboardForm(true)
+        }}>+ Novo Dashboard</button>
+      </div>
+
+      {error && <div className="test-status error"><p>{error}</p></div>}
+
+      {loading ? <div className="empty-state"><p>Carregando dashboards...</p></div> : (
+        <>
+          <div className="dashboard-list">
+            {dashboards.map((item) => (
+              <button key={item.id} className={`dashboard-list-item ${selectedId === item.id ? 'selected' : ''}`} onClick={() => setSelectedId(item.id)}>
+                <strong>{item.name}</strong>
+                <span>{item.company_name}</span>
+                {item.is_default ? <em>★ Padrão</em> : null}
+              </button>
+            ))}
+            {!dashboards.length && <div className="empty-state"><p>Nenhum dashboard disponível.</p></div>}
+          </div>
+
+          {dashboard && (
+            <div className="dashboard-editor">
+              <div className="dashboard-editor-header">
+                <div>
+                  <h2>{dashboard.name}</h2>
+                  <p>{dashboard.description || 'Sem descrição.'} · {dashboard.company_name}</p>
+                </div>
+                <div className="dashboard-toolbar">
+                  <button className="btn-small" onClick={openNewWidget}>+ Adicionar Widget</button>
+                  <button className="btn-small danger" onClick={handleDashboardDelete} disabled={busy}>Excluir Dashboard</button>
+                </div>
+              </div>
+
+              <div className="dashboard-grid">
+                {(dashboard.widgets || []).map((widget) => (
+                  <DashboardWidget key={widget.id} widget={widget} onEdit={openEditWidget} onDelete={handleWidgetDelete} />
+                ))}
+                {!dashboard.widgets?.length && <div className="empty-state"><p>Adicione um widget para começar.</p></div>}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {showDashboardForm && (
+        <div className="dashboard-modal-backdrop" onClick={() => setShowDashboardForm(false)}>
+          <form className="dashboard-modal" onSubmit={handleDashboardSubmit} onClick={(event) => event.stopPropagation()}>
+            <h3>Novo Dashboard</h3>
+            <div className="form-group"><label>Nome</label><input value={dashboardForm.name} onChange={(e) => setDashboardForm({ ...dashboardForm, name: e.target.value })} placeholder="Ex.: Produção" autoFocus /></div>
+            <div className="form-group"><label>Empresa</label><select value={dashboardForm.companyId} onChange={(e) => setDashboardForm({ ...dashboardForm, companyId: e.target.value })}><option value="">Selecione</option>{companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}</select></div>
+            <div className="form-group"><label>Descrição</label><input value={dashboardForm.description} onChange={(e) => setDashboardForm({ ...dashboardForm, description: e.target.value })} /></div>
+            <label className="dashboard-check"><input type="checkbox" checked={dashboardForm.isDefault} onChange={(e) => setDashboardForm({ ...dashboardForm, isDefault: e.target.checked })} /> Dashboard padrão</label>
+            <div className="dashboard-modal-actions"><button type="button" className="btn-small" onClick={() => setShowDashboardForm(false)}>Cancelar</button><button className="btn-test" disabled={busy}>Salvar</button></div>
+          </form>
+        </div>
+      )}
+
+      {showWidgetForm && (
+        <div className="dashboard-modal-backdrop" onClick={resetWidgetForm}>
+          <form className="dashboard-modal" onSubmit={handleWidgetSubmit} onClick={(event) => event.stopPropagation()}>
+            <h3>{editingWidget ? 'Editar Widget' : 'Adicionar Widget'}</h3>
+            <div className={`form-group ${widgetValidationError && !widgetForm.name.trim() ? 'has-error' : ''}`}><label htmlFor="dashboard-widget-name">Nome <span className="required-mark">*</span></label><input id="dashboard-widget-name" ref={widgetNameRef} value={widgetForm.name} onChange={(e) => { setWidgetForm({ ...widgetForm, name: e.target.value }); if (e.target.value.trim()) setWidgetValidationError('') }} placeholder="Ex.: Temperatura 1" autoFocus aria-invalid={Boolean(widgetValidationError && !widgetForm.name.trim())} />{widgetValidationError && !widgetForm.name.trim() && <div className="field-error">{widgetValidationError}</div>}</div>
+            <div className="form-group"><label>Tipo</label><select value={widgetForm.type} onChange={(e) => setWidgetForm({ ...widgetForm, type: e.target.value, size: getDefaultWidgetSize(e.target.value) })}><option value="value">Valor atual</option><option value="chart">Gráfico</option><option value="table">Tabela</option></select></div>
+            <div className="form-group"><label>Data Source</label><select value={widgetForm.dataSourceId} onChange={(e) => setWidgetForm({ ...widgetForm, dataSourceId: e.target.value })}><option value="">Selecione</option>{dataSources.map((source) => <option key={source.id} value={source.id}>{source.name}{source.topic ? ` — ${source.topic}` : ''}</option>)}</select></div>
+            <div className="form-group"><label>Métrica</label><input value={widgetForm.metric} onChange={(e) => setWidgetForm({ ...widgetForm, metric: e.target.value })} placeholder="temperature_1" /></div>
+            <div className="dashboard-form-row"><div className="form-group"><label>Unidade</label><input value={widgetForm.unit} onChange={(e) => setWidgetForm({ ...widgetForm, unit: e.target.value })} placeholder="°C" /></div><div className="form-group"><label>Casas decimais</label><input type="number" min="0" max="6" value={widgetForm.decimalPlaces} onChange={(e) => setWidgetForm({ ...widgetForm, decimalPlaces: e.target.value })} /></div></div><div className="form-group"><label>Tamanho</label><select value={widgetForm.size || getDefaultWidgetSize(widgetForm.type)} onChange={(e) => setWidgetForm({ ...widgetForm, size: e.target.value })}>{WIDGET_SIZE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><small className="form-help">O conteúdo permanece dentro do tamanho escolhido; tabelas usam rolagem interna.</small></div>
+            {widgetForm.type === 'chart' && <div className="form-group"><label>Período (horas)</label><input type="number" min="1" max="720" value={widgetForm.periodHours} onChange={(e) => setWidgetForm({ ...widgetForm, periodHours: e.target.value })} /></div>}
+            <div className="dashboard-modal-actions"><button type="button" className="btn-small" onClick={resetWidgetForm}>Cancelar</button><button className="btn-test" disabled={busy}>Salvar</button></div>
+          </form>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function App() {
   const [currentUser, setCurrentUser] = useState(null)
   const [authLoading, setAuthLoading] = useState(true)
@@ -2444,6 +2821,12 @@ function App() {
               Medições
             </button>
             <button
+              className={`nav-item ${currentPage === 'dashboards' ? 'active' : ''}`}
+              onClick={() => handlePageChange('dashboards')}
+            >
+              Dashboards
+            </button>
+            <button
               className={`nav-item ${currentPage === 'interpretation' ? 'active' : ''}`}
               onClick={() => handlePageChange('interpretation')}
             >
@@ -2487,6 +2870,7 @@ function App() {
           )}
           {currentPage === 'raw-messages' && <RawMessagesPage />}
           {currentPage === 'measurements' && <MeasurementsPage />}
+          {currentPage === 'dashboards' && <DashboardPage />}
           {currentPage === 'interpretation' && <InterpretationPage currentUser={currentUser} />}
           {currentPage === 'companies' && <CompaniesPage />}
           {currentPage === 'users' && <UsersPage />}

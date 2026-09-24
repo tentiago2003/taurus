@@ -202,3 +202,48 @@ export function testInterpretation(dataSourceId, { payload, interpretation }) {
     body: JSON.stringify({ payload, interpretation }),
   })
 }
+
+
+export function fetchDashboards() {
+  return request('/dashboards')
+}
+
+export function fetchDashboard(id) {
+  return request(`/dashboards/${id}`)
+}
+
+export function createDashboard(data) {
+  return request('/dashboards', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export function updateDashboard(id, data) {
+  return request(`/dashboards/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}
+
+export function deleteDashboard(id) {
+  return request(`/dashboards/${id}`, { method: 'DELETE' })
+}
+
+export function createWidget(data) {
+  return request('/widgets', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export function updateWidget(id, data) {
+  return request(`/widgets/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}
+
+export function deleteWidget(id) {
+  return request(`/widgets/${id}`, { method: 'DELETE' })
+}
