@@ -2147,16 +2147,16 @@ function AboutPage() {
 
 
 const WIDGET_SIZE_OPTIONS = [
-  { value: '1x1', label: 'Pequeno — 1×1' },
-  { value: '2x1', label: 'Largo — 2×1' },
-  { value: '1x2', label: 'Alto — 1×2' },
-  { value: '2x2', label: 'Grande — 2×2' },
-  { value: '2x3', label: 'Grande vertical — 2×3' },
+  { value: '1x1', label: 'Pequeno' },
+  { value: '2x1', label: 'Largo' },
+  { value: '1x2', label: 'Alto' },
+  { value: '2x2', label: 'Grande' },
+  { value: '2x3', label: 'Grande vertical' },
 ]
 
 const getDefaultWidgetSize = (type) => {
-  if (type === 'table') return '2x3'
-  if (type === 'chart') return '2x2'
+  if (type === 'table') return '1x2'
+  if (type === 'chart') return '2x1'
   return '1x1'
 }
 
