@@ -5,49 +5,50 @@ const { parseIdParam } = require('../services/validation');
 const connectionManager = require('../services/connection-manager.service');
 
 async function list(req, res) {
-  sendJson(res, 200, service.list().map((connection) => ({ ...connection, runtime: connectionManager.getStatus(connection.id) })));
+  sendJson(res, 200, service.list(req.user).map((connection) => ({ ...connection, runtime: connectionManager.getStatus(connection.id) })));
 }
 
 async function get(req, res, params) {
   const id = parseIdParam(params.id);
-  sendJson(res, 200, { ...service.get(id), runtime: connectionManager.getStatus(id) });
+  sendJson(res, 200, { ...service.get(id, req.user), runtime: connectionManager.getStatus(id) });
 }
 
 async function create(req, res) {
   const body = await readJsonBody(req);
-  const created = service.create({ ...body, createdBy: req.user?.id ?? null });
+  const created = service.create({ ...body, createdBy: req.user?.id ?? null }, req.user);
   sendJson(res, 201, { ...created, runtime: connectionManager.getStatus(created.id) });
 }
 
 async function update(req, res, params) {
   const body = await readJsonBody(req);
-  const updated = service.update(parseIdParam(params.id), { ...body, updatedBy: req.user?.id ?? null });
+  const updated = service.update(parseIdParam(params.id), { ...body, updatedBy: req.user?.id ?? null }, req.user);
   connectionManager.sync(updated.id);
   sendJson(res, 200, { ...updated, runtime: connectionManager.getStatus(updated.id) });
 }
 
 async function deactivate(req, res, params) {
   const id = parseIdParam(params.id);
-  const updated = service.deactivate(id);
+  const updated = service.deactivate(id, req.user);
   connectionManager.stop(id);
   sendJson(res, 200, { ...updated, runtime: connectionManager.getStatus(id) });
 }
 
 async function reactivate(req, res, params) {
   const id = parseIdParam(params.id);
-  const updated = service.reactivate(id);
+  const updated = service.reactivate(id, req.user);
   connectionManager.start(id);
   sendJson(res, 200, { ...updated, runtime: connectionManager.getStatus(id) });
 }
 
 async function reconnect(req, res, params) {
   const id = parseIdParam(params.id);
+  service.get(id, req.user);
   sendJson(res, 200, connectionManager.reconnect(id));
 }
 
 async function events(req, res, params) {
   const id = parseIdParam(params.id);
-  service.get(id);
+  service.get(id, req.user);
   const url = new URL(req.url, 'http://localhost');
   const eventType = url.searchParams.get('eventType') || null;
   const from = url.searchParams.get('from') || null;
@@ -60,7 +61,7 @@ async function events(req, res, params) {
 async function remove(req, res, params) {
   const id = parseIdParam(params.id);
   connectionManager.stop(id, { log: false });
-  service.remove(id);
+  service.remove(id, req.user);
   res.statusCode = 204;
   res.end();
 }

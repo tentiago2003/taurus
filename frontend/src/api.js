@@ -3,6 +3,7 @@ const API_BASE = '/api'
 async function request(path, options = {}) {
   const response = await fetch(`${API_BASE}${path}`, {
     headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
     ...options,
   })
 
@@ -94,6 +95,10 @@ export function deactivateUser(id) {
 
 export function reactivateUser(id) {
   return request(`/users/${id}/reactivate`, { method: 'POST' })
+}
+
+export function deleteUser(id) {
+  return request(`/users/${id}`, { method: 'DELETE' })
 }
 
 export function fetchDataSources() {

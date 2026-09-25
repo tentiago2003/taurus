@@ -11,14 +11,14 @@ function parseDataSourceId(value) {
 
 async function show(req, res, params) {
   const dataSourceId = parseDataSourceId(params.id);
-  sendJson(res, 200, { interpretation: service.get(dataSourceId) });
+  sendJson(res, 200, { interpretation: service.get(dataSourceId, req.user) });
 }
 
 async function update(req, res, params) {
   const dataSourceId = parseDataSourceId(params.id);
   const body = await readJsonBody(req);
   sendJson(res, 200, {
-    interpretation: service.save(dataSourceId, body.interpretation ?? body, req.user.id),
+    interpretation: service.save(dataSourceId, body.interpretation ?? body, req.user.id, req.user),
   });
 }
 
@@ -27,7 +27,7 @@ async function test(req, res, params) {
   const body = await readJsonBody(req);
   const configuration = body.interpretation ?? body.configuration;
   if (!configuration) {
-    const current = service.get(dataSourceId);
+    const current = service.get(dataSourceId, req.user);
     if (!current) {
       throw new ApiError(400, 'Informe uma configuração de interpretação para o teste.');
     }

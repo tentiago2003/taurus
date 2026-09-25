@@ -121,3 +121,43 @@ test('desativa e reativa conexão', () => {
   assert.equal(connectionsService.deactivate(created.id).active, 0);
   assert.equal(connectionsService.reactivate(created.id).active, 1);
 });
+
+test('não expõe a senha MQTT nas respostas da camada de serviço', () => {
+  const company = createCompany('Empresa Conexão Segurança');
+  const created = connectionsService.create({
+    companyId: company.id,
+    name: 'MQTT Seguro',
+    type: 'MQTT',
+    configuration: { host: 'broker.example.com', port: 1883, username: 'user', password: 'segredo' },
+    topics: [{ name: 'LoRa Seguro', topic: 'a/secure' }],
+  });
+
+  assert.equal(created.configuration.password, undefined);
+  assert.equal(created.configuration.hasPassword, true);
+
+  const fetched = connectionsService.get(created.id);
+  assert.equal(fetched.configuration.password, undefined);
+  assert.equal(fetched.configuration.hasPassword, true);
+});
+
+test('edição sem nova senha preserva a credencial armazenada sem expô-la', () => {
+  const company = createCompany('Empresa Conexão Senha');
+  const created = connectionsService.create({
+    companyId: company.id,
+    name: 'MQTT Senha',
+    type: 'MQTT',
+    configuration: { host: 'broker.example.com', port: 1883, password: 'segredo-original' },
+    topics: [{ name: 'LoRa Senha', topic: 'a/password' }],
+  });
+
+  const updated = connectionsService.update(created.id, {
+    companyId: company.id,
+    name: 'MQTT Senha Atualizado',
+    type: 'MQTT',
+    configuration: { host: 'broker2.example.com', port: 1884, password: '' },
+    topics: [{ id: created.dataSources[0].id, name: 'LoRa Senha', topic: 'a/password' }],
+  });
+
+  assert.equal(updated.configuration.password, undefined);
+  assert.equal(updated.configuration.hasPassword, true);
+});

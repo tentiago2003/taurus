@@ -2,27 +2,23 @@ const repository = require('../db/repository');
 const { ApiError } = require('../http/errors');
 const { requireString, requireEmail, requireInt, optionalInt } = require('./validation');
 const { hashPassword } = require('./password');
+const access = require('./access.service');
 
-const ADMIN_PROFILE_NAME = 'Admin';
+const ADMIN_PROFILE_NAME = access.PROFILE_ADMIN;
 
-/** Remove password_hash da resposta: nunca deve trafegar pela API. */
 function sanitize(user) {
-  if (!user) {
-    return user;
-  }
+  if (!user) return user;
   const { password_hash, ...rest } = user;
-  return rest;
+  const profile = repository.profiles.findById(user.profile_id);
+  return { ...rest, profile_name: profile?.name ?? null };
 }
 
 function resolveProfile(profileId) {
   const profile = repository.profiles.findById(profileId);
-  if (!profile) {
-    throw new ApiError(400, 'Perfil informado não existe.');
-  }
+  if (!profile) throw new ApiError(400, 'Perfil informado não existe.');
   return profile;
 }
 
-/** Admin pode ter company_id nulo; Gerente e Consulta exigem empresa. */
 function ensureCompanyRule(profile, companyId) {
   if (profile.name !== ADMIN_PROFILE_NAME && companyId === null) {
     throw new ApiError(400, `Usuários com perfil "${profile.name}" exigem company_id.`);
@@ -34,111 +30,107 @@ function ensureCompanyRule(profile, companyId) {
 
 function ensureEmailAvailable(email, excludeId = null) {
   const existing = repository.users.findByEmail(email);
-  if (existing && existing.id !== excludeId) {
-    throw new ApiError(409, 'Já existe um usuário com este e-mail.');
-  }
+  if (existing && existing.id !== excludeId) throw new ApiError(409, 'Já existe um usuário com este e-mail.');
 }
 
 function ensureExists(id) {
   const user = repository.users.findById(id);
-  if (!user) {
-    throw new ApiError(404, 'Usuário não encontrado.');
-  }
+  if (!user) throw new ApiError(404, 'Usuário não encontrado.');
   return user;
 }
 
-function list() {
-  return repository.users.list().map(sanitize);
+function list(actor) {
+  if (!actor || access.isAdmin(actor)) return repository.users.list().map(sanitize);
+  if (!access.isManager(actor)) throw new ApiError(403, 'Usuário sem permissão para consultar usuários.');
+  return repository.users.list().filter((user) => Number(user.company_id) === Number(actor.company_id)).map(sanitize);
 }
 
-function findById(id) {
-  return sanitize(ensureExists(id));
+function findById(id, actor) {
+  const user = ensureExists(id);
+  access.ensureUserManagementTarget(actor, user);
+  return sanitize(user);
 }
 
-function create(payload = {}) {
+function create(payload = {}, actor) {
+  access.ensureAdminOrManager(actor);
   const name = requireString(payload.name, 'name');
   const email = requireEmail(payload.email);
   const password = requireString(payload.password, 'password');
   const profileId = requireInt(payload.profileId, 'profileId');
-  const companyId = optionalInt(payload.companyId);
-
   const profile = resolveProfile(profileId);
+  access.ensureUserProfileForManager(actor, profile);
+
+  const requestedCompanyId = optionalInt(payload.companyId);
+  const companyId = access.resolveCompanyIdForWrite(actor, requestedCompanyId);
   ensureCompanyRule(profile, companyId);
   ensureEmailAvailable(email);
 
-  const created = repository.users.create({
+  return sanitize(repository.users.create({
     companyId,
     profileId,
     name,
     email,
     passwordHash: hashPassword(password),
-    createdBy: payload.createdBy ?? null,
-  });
-  return sanitize(created);
+    createdBy: actor?.id ?? payload.createdBy ?? null,
+  }));
 }
 
-function update(id, payload = {}) {
-  ensureExists(id);
+function update(id, payload = {}, actor) {
+  const existing = ensureExists(id);
+  access.ensureUserManagementTarget(actor, existing);
+
   const name = requireString(payload.name, 'name');
   const email = requireEmail(payload.email);
   const profileId = requireInt(payload.profileId, 'profileId');
-  const companyId = optionalInt(payload.companyId);
-
   const profile = resolveProfile(profileId);
+  access.ensureUserProfileForManager(actor, profile);
+
+  const requestedCompanyId = optionalInt(payload.companyId);
+  const companyId = access.resolveCompanyIdForWrite(actor, requestedCompanyId);
   ensureCompanyRule(profile, companyId);
   ensureEmailAvailable(email, id);
 
-  // Senha só é alterada quando uma nova é informada.
   const passwordHash = payload.password ? hashPassword(requireString(payload.password, 'password')) : null;
-
-  const updated = repository.users.update({
+  return sanitize(repository.users.update({
     id,
     companyId,
     profileId,
     name,
     email,
     passwordHash,
-    updatedBy: null,
-  });
-  return sanitize(updated);
+    updatedBy: actor?.id ?? null,
+  }));
 }
 
-function deactivate(id) {
-  ensureExists(id);
-  return sanitize(repository.users.setActive({ id, active: 0, updatedBy: null }));
+function deactivate(id, actor) {
+  const existing = ensureExists(id);
+  access.ensureUserManagementTarget(actor, existing);
+  return sanitize(repository.users.setActive({ id, active: 0, updatedBy: actor?.id ?? null }));
 }
 
-function reactivate(id) {
-  ensureExists(id);
-  return sanitize(repository.users.setActive({ id, active: 1, updatedBy: null }));
+function reactivate(id, actor) {
+  const existing = ensureExists(id);
+  access.ensureUserManagementTarget(actor, existing);
+  return sanitize(repository.users.setActive({ id, active: 1, updatedBy: actor?.id ?? null }));
 }
 
-function remove(id) {
-  ensureExists(id);
+function remove(id, actor) {
+  const existing = ensureExists(id);
+  access.ensureUserManagementTarget(actor, existing);
+  if (actor?.id && Number(actor.id) === Number(id)) throw new ApiError(400, 'O usuário logado não pode excluir a própria conta.');
   repository.users.remove(id);
 }
 
-/**
- * Bootstrap do primeiro Admin via TAURUS_ADMIN_EMAIL/TAURUS_ADMIN_PASSWORD.
- * Idempotente: não recria nem sobrescreve senha se o e-mail já existir.
- * Não substitui um sistema de autenticação completo.
- */
 function bootstrapAdmin() {
   const email = process.env.TAURUS_ADMIN_EMAIL;
   const password = process.env.TAURUS_ADMIN_PASSWORD;
-  if (!email || !password) {
-    return;
-  }
+  if (!email || !password) return;
 
   const normalizedEmail = email.trim().toLowerCase();
-  if (repository.users.findByEmail(normalizedEmail)) {
-    return;
-  }
+  if (repository.users.findByEmail(normalizedEmail)) return;
 
   const adminProfile = repository.profiles.findByName(ADMIN_PROFILE_NAME);
-  if (!adminProfile) {
-    return;
-  }
+  if (!adminProfile) return;
 
   repository.users.create({
     companyId: null,
@@ -151,13 +143,4 @@ function bootstrapAdmin() {
   console.log(`Usuário Admin inicial criado: ${normalizedEmail}`);
 }
 
-module.exports = {
-  list,
-  findById,
-  create,
-  update,
-  deactivate,
-  reactivate,
-  remove,
-  bootstrapAdmin,
-};
+module.exports = { list, findById, create, update, deactivate, reactivate, remove, bootstrapAdmin };

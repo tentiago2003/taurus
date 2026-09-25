@@ -1,4 +1,5 @@
 const repository = require('../db/repository');
+const access = require('./access.service');
 
 /**
  * Recebe a mensagem MQTT sem interpretar o payload.
@@ -19,7 +20,8 @@ function collect({ connectionId, topic, payload, receivedAt = new Date().toISOSt
   });
 }
 
-function listByDataSource(dataSourceId, options = {}) {
+function listByDataSource(dataSourceId, options = {}, user) {
+  access.ensureCompanyAccess(user, access.companyIdFromDataSource(dataSourceId));
   return repository.rawMessages.listByDataSource(dataSourceId, options);
 }
 
@@ -47,12 +49,18 @@ function mapRows(rows) {
   });
 }
 
-function listRecent(options = {}) {
-  return mapRows(repository.rawMessages.listRecent(options));
+function listRecent(options = {}, user) {
+  if (!user || access.isAdmin(user)) return mapRows(repository.rawMessages.listRecent(options));
+  return mapRows(repository.rawMessages.listRecentPagedByCompany(Number(user.company_id), options).rows);
 }
 
-function listPaged(options = {}) {
-  const result = repository.rawMessages.listRecentPaged(options);
+function listPaged(options = {}, user) {
+  if (options.dataSourceId !== null && options.dataSourceId !== undefined && options.dataSourceId !== '') {
+    access.ensureCompanyAccess(user, access.companyIdFromDataSource(Number(options.dataSourceId)));
+  }
+  const result = (!user || access.isAdmin(user))
+    ? repository.rawMessages.listRecentPaged(options)
+    : repository.rawMessages.listRecentPagedByCompany(Number(user.company_id), options);
   return { ...result, rows: mapRows(result.rows) };
 }
 

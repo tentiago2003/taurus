@@ -2,6 +2,7 @@
 
 const repository = require('../db/repository');
 const { ApiError } = require('../http/errors');
+const access = require('./access.service');
 
 const CONFIG_VERSION = 1;
 const SUPPORTED_FORMATS = new Set(['json']);
@@ -156,13 +157,18 @@ function interpret({ payload, configuration, receivedAt = new Date().toISOString
   return { measurements, errors };
 }
 
-function get(dataSourceId) {
+function get(dataSourceId, user) {
+  const companyId = access.companyIdFromDataSource(dataSourceId);
+  access.ensureCompanyAccess(user, companyId);
   const dataSource = repository.dataSources.findById(dataSourceId);
   if (!dataSource) throw new ApiError(404, 'Fonte de dados não encontrada.');
   return dataSource.configuration?.interpretation || null;
 }
 
-function save(dataSourceId, configuration, updatedBy = null) {
+function save(dataSourceId, configuration, updatedBy = null, user = null) {
+  const companyId = access.companyIdFromDataSource(dataSourceId);
+  access.ensureAdminOrManager(user);
+  access.ensureCompanyAccess(user, companyId);
   const dataSource = repository.dataSources.findById(dataSourceId);
   if (!dataSource) throw new ApiError(404, 'Fonte de dados não encontrada.');
   const normalized = normalizeConfiguration(configuration);

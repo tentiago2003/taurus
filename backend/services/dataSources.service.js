@@ -1,12 +1,15 @@
 const repository = require('../db/repository');
 const { ApiError } = require('../http/errors');
 const { requireString, requireInt, optionalInt } = require('./validation');
+const access = require('./access.service');
 
-function list() {
-  return repository.dataSources.list();
+function list(user) {
+  if (!user || access.isAdmin(user)) return repository.dataSources.list();
+  return repository.dataSources.list().filter((source) => Number(access.companyIdFromConnection(source.connection_id)) === Number(user.company_id));
 }
 
-function create(payload = {}) {
+function create(payload = {}, user) {
+  access.ensureAdminOrManager(user);
   const connectionId = requireInt(payload.connectionId, 'connectionId');
   const name = requireString(payload.name, 'name');
   const type = requireString(payload.type, 'type');
@@ -16,9 +19,9 @@ function create(payload = {}) {
   const storeHistory = payload.storeHistory === undefined ? 1 : payload.storeHistory ? 1 : 0;
   const configuration = payload.configuration ?? null;
 
-  if (!repository.connections.findById(connectionId)) {
-    throw new ApiError(400, 'Conexão informada não existe.');
-  }
+  const connection = repository.connections.findById(connectionId);
+  if (!connection) throw new ApiError(400, 'Conexão informada não existe.');
+  access.ensureCompanyAccess(user, connection.company_id);
 
   return repository.dataSources.create({
     connectionId,

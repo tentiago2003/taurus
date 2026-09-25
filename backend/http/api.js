@@ -1,6 +1,7 @@
 const router = require('../routes');
 const { sendJson } = require('./utils');
 const authService = require('../services/auth.service');
+const { canAccess } = require('./authorization');
 
 /**
  * Tenta atender a requisição como chamada de API (prefixo /api/).
@@ -29,12 +30,9 @@ async function handleApiRequest(req, res) {
     }
     req.user = user;
 
-    if (pathname === '/api/system-settings') {
-      const profile = require('../db/repository').profiles.findById(user.profile_id);
-      if (profile?.name !== 'Admin') {
-        sendJson(res, 403, { error: 'Apenas usuários Admin podem acessar os parâmetros do sistema.' });
-        return true;
-      }
+    if (!canAccess({ ...user, profile_name: require('../db/repository').profiles.findById(user.profile_id)?.name ?? null }, req.method, pathname)) {
+      sendJson(res, 403, { error: 'Usuário sem permissão para esta operação.' });
+      return true;
     }
   }
 

@@ -1,22 +1,35 @@
 const repository = require('../db/repository');
 const { ApiError } = require('../http/errors');
 const { requireString, requireInt, optionalInt } = require('./validation');
+const access = require('./access.service');
 
 const SUPPORTED_TYPES = new Set(['MQTT']);
 
-function list() {
-  return repository.connections.list().map((connection) => ({
-    ...connection,
-    dataSources: repository.dataSources.listByConnection(connection.id),
-  }));
+function sanitizeConfiguration(configuration = {}) {
+  const { password, ...safe } = configuration || {};
+  return { ...safe, hasPassword: Boolean(password) };
 }
 
-function normalizeConfiguration(payload = {}) {
+function sanitizeConnection(connection) {
+  if (!connection) return connection;
+  return {
+    ...connection,
+    configuration: sanitizeConfiguration(connection.configuration),
+    dataSources: repository.dataSources.listByConnection(connection.id),
+  };
+}
+
+function list(user) {
+  if (!user || access.isAdmin(user)) return repository.connections.list().map(sanitizeConnection);
+  return repository.connections.listByCompany(user.company_id).map(sanitizeConnection);
+}
+
+function normalizeConfiguration(payload = {}, existingConfiguration = {}) {
   return {
     host: requireString(payload.host, 'host'),
     port: requireInt(payload.port, 'port'),
     username: payload.username?.trim() || '',
-    password: payload.password ?? '',
+    password: payload.password ? String(payload.password) : (existingConfiguration.password || ''),
   };
 }
 
@@ -72,16 +85,16 @@ function ensureExists(id) {
   return connection;
 }
 
-function get(id) {
+function get(id, user) {
   const connection = ensureExists(id);
-  return {
-    ...connection,
-    dataSources: repository.dataSources.listByConnection(id),
-  };
+  access.ensureCompanyAccess(user, connection.company_id);
+  return sanitizeConnection(connection);
 }
 
-function create(payload = {}) {
-  const companyId = requireInt(payload.companyId, 'companyId');
+function create(payload = {}, user) {
+  access.ensureAdminOrManager(user);
+  const requestedCompanyId = optionalInt(payload.companyId);
+  const companyId = access.resolveCompanyIdForWrite(user, requestedCompanyId);
   const name = requireString(payload.name, 'name');
   const type = requireString(payload.type, 'type');
   validateType(type);
@@ -89,27 +102,33 @@ function create(payload = {}) {
   const configuration = normalizeConfiguration(payload.configuration || payload);
   const topics = normalizeTopics(payload.topics);
 
-  return repository.connections.createWithDataSources({
+  return sanitizeConnection(repository.connections.createWithDataSources({
     companyId,
     name,
     type,
     configuration,
     dataSources: topics,
     createdBy: payload.createdBy ?? null,
-  });
+  }));
 }
 
-function update(id, payload = {}) {
-  ensureExists(id);
-  const companyId = requireInt(payload.companyId, 'companyId');
+function update(id, payload = {}, user) {
+  const existing = ensureExists(id);
+  access.ensureAdminOrManager(user);
+  access.ensureCompanyAccess(user, existing.company_id);
+  const requestedCompanyId = optionalInt(payload.companyId);
+  const companyId = requestedCompanyId ?? existing.company_id;
+  if (Number(companyId) !== Number(existing.company_id)) {
+    throw new ApiError(400, 'A empresa da conexão não pode ser alterada após sua criação.');
+  }
   const name = requireString(payload.name, 'name');
   const type = requireString(payload.type, 'type');
   validateType(type);
   ensureCompany(companyId);
-  const configuration = normalizeConfiguration(payload.configuration || payload);
+  const configuration = normalizeConfiguration(payload.configuration || payload, existing.configuration);
   const topics = normalizeTopics(payload.topics);
 
-  return repository.connections.updateWithDataSources({
+  return sanitizeConnection(repository.connections.updateWithDataSources({
     id,
     companyId,
     name,
@@ -117,24 +136,23 @@ function update(id, payload = {}) {
     configuration,
     dataSources: topics,
     updatedBy: payload.updatedBy ?? null,
-  });
+  }));
 }
 
-function setActive(id, active) {
-  ensureExists(id);
-  return repository.connections.setActive({ id, active, updatedBy: null });
+function setActive(id, active, user) {
+  const existing = ensureExists(id);
+  access.ensureAdminOrManager(user);
+  access.ensureCompanyAccess(user, existing.company_id);
+  return sanitizeConnection(repository.connections.setActive({ id, active, updatedBy: null }));
 }
 
-function deactivate(id) {
-  return setActive(id, 0);
-}
+function deactivate(id, user) { return setActive(id, 0, user); }
+function reactivate(id, user) { return setActive(id, 1, user); }
 
-function reactivate(id) {
-  return setActive(id, 1);
-}
-
-function remove(id) {
-  ensureExists(id);
+function remove(id, user) {
+  const existing = ensureExists(id);
+  access.ensureAdminOrManager(user);
+  access.ensureCompanyAccess(user, existing.company_id);
   repository.connections.remove(id);
 }
 

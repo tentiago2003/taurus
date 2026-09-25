@@ -31,7 +31,8 @@ function publicUser(user) {
   if (!user) return null;
   const { password_hash, ...safe } = user;
   const profile = repository.profiles.findById(user.profile_id);
-  return { ...safe, profile_name: profile?.name ?? null };
+  const company = user.company_id ? repository.companies.findById(user.company_id) : null;
+  return { ...safe, profile_name: profile?.name ?? null, company_name: company?.name ?? null };
 }
 
 function login(email, password) {
@@ -62,7 +63,7 @@ function getUserFromRequest(req) {
     return null;
   }
 
-  return user;
+  return publicUser(user);
 }
 
 function logout(req) {

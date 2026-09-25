@@ -17,7 +17,7 @@ async function list(req, res) {
   sendJson(res, 200, service.listPaged({
     dataSourceId: dataSourceId === null || dataSourceId === '' ? null : Number(dataSourceId),
     metric, from, to, page, pageSize,
-  }));
+  }, req.user));
 }
 
 module.exports = { list };

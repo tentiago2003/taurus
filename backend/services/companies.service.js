@@ -1,11 +1,14 @@
 const repository = require('../db/repository');
 const { requireString, ApiError } = require('./validation');
+const access = require('./access.service');
 
-function list() {
+function list(user) {
+  access.ensureAdmin(user);
   return repository.companies.list();
 }
 
-function create(payload = {}) {
+function create(payload = {}, user) {
+  access.ensureAdmin(user);
   const name = requireString(payload.name, 'name');
   return repository.companies.create({ name, createdBy: payload.createdBy ?? null });
 }
@@ -18,23 +21,27 @@ function ensureExists(id) {
   return company;
 }
 
-function update(id, payload = {}) {
+function update(id, payload = {}, user) {
+  access.ensureAdmin(user);
   ensureExists(id);
   const name = requireString(payload.name, 'name');
   return repository.companies.update({ id, name, updatedBy: null });
 }
 
-function deactivate(id) {
+function deactivate(id, user) {
+  access.ensureAdmin(user);
   ensureExists(id);
   return repository.companies.setActive({ id, active: 0, updatedBy: null });
 }
 
-function reactivate(id) {
+function reactivate(id, user) {
+  access.ensureAdmin(user);
   ensureExists(id);
   return repository.companies.setActive({ id, active: 1, updatedBy: null });
 }
 
-function remove(id) {
+function remove(id, user) {
+  access.ensureAdmin(user);
   ensureExists(id);
   const dependents = repository.companies.countDependents(id);
   const total = dependents.users + dependents.connections + dependents.dashboards;

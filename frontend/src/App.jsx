@@ -20,6 +20,7 @@ import {
   updateUser,
   deactivateUser,
   reactivateUser,
+  deleteUser,
   login,
   fetchCurrentUser,
   logout,
@@ -407,7 +408,7 @@ const ADMIN_PROFILE_NAME = 'Admin'
 
 const emptyUserForm = { name: '', email: '', profileId: '', companyId: '', password: '' }
 
-function UsersPage() {
+function UsersPage({ currentUser }) {
   const [users, setUsers] = useState([])
   const [profiles, setProfiles] = useState([])
   const [companies, setCompanies] = useState([])
@@ -425,25 +426,26 @@ function UsersPage() {
   const [editingId, setEditingId] = useState(null)
   const [editForm, setEditForm] = useState(emptyUserForm)
   const [busyId, setBusyId] = useState(null)
+  const isAdmin = currentUser?.profile_name === 'Admin'
+  const isManager = currentUser?.profile_name === 'Gerente'
+  const isAdminOrManager = isAdmin || isManager
 
   const isAdminProfile = (profileId) =>
     profiles.find((p) => p.id === Number(profileId))?.name === ADMIN_PROFILE_NAME
 
   const profileName = (profileId) => profiles.find((p) => p.id === profileId)?.name || '—'
-  const companyName = (companyId) => companies.find((c) => c.id === companyId)?.name || '—'
+  const companyName = (companyId) => companies.find((c) => c.id === companyId)?.name || (currentUser?.company_id && Number(currentUser.company_id) === Number(companyId) ? (currentUser.company_name || 'Empresa atual') : '—')
 
   const loadAll = async () => {
     setIsLoading(true)
     setLoadError('')
     try {
-      const [usersData, profilesData, companiesData] = await Promise.all([
-        fetchUsers(),
-        fetchProfiles(),
-        fetchCompanies(),
-      ])
+      const requests = [fetchUsers(), fetchProfiles()]
+      if (isAdmin) requests.push(fetchCompanies())
+      const [usersData, profilesData, companiesData] = await Promise.all(requests)
       setUsers(usersData)
       setProfiles(profilesData)
-      setCompanies(companiesData)
+      setCompanies(companiesData || [])
     } catch (err) {
       setLoadError(err.message || 'Não foi possível carregar os usuários.')
     } finally {
@@ -453,7 +455,7 @@ function UsersPage() {
 
   useEffect(() => {
     loadAll()
-  }, [])
+  }, [currentUser?.profile_name, currentUser?.company_id])
 
   const handleFormChange = (e) => {
     const { name, value } = e.target
@@ -468,7 +470,7 @@ function UsersPage() {
       setFormError('Preencha nome, e-mail, perfil e senha.')
       return
     }
-    if (!isAdminProfile(form.profileId) && !form.companyId) {
+    if (!isAdminProfile(form.profileId) && !form.companyId && !isManager) {
       setFormError('Empresa é obrigatória para este perfil.')
       return
     }
@@ -479,7 +481,7 @@ function UsersPage() {
         name: form.name.trim(),
         email: form.email.trim(),
         profileId: Number(form.profileId),
-        companyId: form.companyId ? Number(form.companyId) : null,
+        companyId: isManager ? Number(currentUser.company_id) : (form.companyId ? Number(form.companyId) : null),
         password: form.password,
       })
       setForm(emptyUserForm)
@@ -530,7 +532,7 @@ function UsersPage() {
         name: editForm.name.trim(),
         email: editForm.email.trim(),
         profileId: Number(editForm.profileId),
-        companyId: editForm.companyId ? Number(editForm.companyId) : null,
+        companyId: isManager ? Number(currentUser.company_id) : (editForm.companyId ? Number(editForm.companyId) : null),
       }
       if (editForm.password.trim()) {
         payload.password = editForm.password.trim()
@@ -556,6 +558,20 @@ function UsersPage() {
       await loadAll()
     } catch (err) {
       setActionError(err.message || 'Não foi possível desativar o usuário.')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const handleDelete = async (user) => {
+    if (!window.confirm(`Excluir definitivamente o usuário "${user.name}"? Esta ação não pode ser desfeita.`)) return
+    setActionError('')
+    setBusyId(user.id)
+    try {
+      await deleteUser(user.id)
+      await loadAll()
+    } catch (err) {
+      setActionError(err.message || 'Não foi possível excluir o usuário.')
     } finally {
       setBusyId(null)
     }
@@ -632,12 +648,12 @@ function UsersPage() {
               name="companyId"
               value={form.companyId}
               onChange={handleFormChange}
-              disabled={isSubmitting || isAdminProfile(form.profileId)}
+              disabled={isSubmitting || isAdminProfile(form.profileId) || isManager}
             >
               <option value="">
-                {isAdminProfile(form.profileId) ? 'Não aplicável' : 'Selecione...'}
+                {isAdminProfile(form.profileId) ? 'Não aplicável' : (isManager ? 'Empresa atual' : 'Selecione...')}
               </option>
-              {companies.map((company) => (
+              {isAdmin && companies.map((company) => (
                 <option key={company.id} value={company.id}>
                   {company.name}
                 </option>
@@ -749,12 +765,12 @@ function UsersPage() {
                           name="companyId"
                           value={editForm.companyId}
                           onChange={handleEditChange}
-                          disabled={busyId === user.id || isAdminProfile(editForm.profileId)}
+                          disabled={busyId === user.id || isAdminProfile(editForm.profileId) || isManager}
                         >
                           <option value="">
                             {isAdminProfile(editForm.profileId) ? 'Não aplicável' : 'Selecione...'}
                           </option>
-                          {companies.map((company) => (
+                          {isAdmin && companies.map((company) => (
                             <option key={company.id} value={company.id}>
                               {company.name}
                             </option>
@@ -830,6 +846,7 @@ function UsersPage() {
                               Reativar
                             </button>
                           )}
+                          <button className="btn-small danger" onClick={() => handleDelete(user)} disabled={busyId === user.id}>Excluir</button>
                         </div>
                       </td>
                     </>
@@ -863,10 +880,10 @@ function runtimeLabel(status) {
   return labels[status] || status || 'Desconectada'
 }
 
-function ConnectionPage({ isTestActive, onStartTest, runtimeStatuses }) {
+function ConnectionPage({ isTestActive, onStartTest, runtimeStatuses, currentUser }) {
   const [defaultSamplingIntervalSeconds, setDefaultSamplingIntervalSeconds] = useState(null)
   const emptyTopic = () => ({ id: null, name: '', topic: '', samplingIntervalSeconds: defaultSamplingIntervalSeconds ?? '', storeHistory: true, active: true })
-  const emptyForm = () => ({ id: null, companyId: '', name: '', type: 'MQTT', host: '', port: '', username: '', password: '', topics: [emptyTopic()] })
+  const emptyForm = () => ({ id: null, companyId: currentUser?.profile_name === 'Gerente' ? String(currentUser.company_id || '') : '', name: '', type: 'MQTT', host: '', port: '', username: '', password: '', topics: [emptyTopic()] })
   const [connections, setConnections] = useState([])
   const [companies, setCompanies] = useState([])
   const [isLoading, setIsLoading] = useState(true)
@@ -889,10 +906,17 @@ function ConnectionPage({ isTestActive, onStartTest, runtimeStatuses }) {
     setIsLoading(true)
     setLoadError('')
     try {
-      const [connectionData, companyData, systemSettings] = await Promise.all([fetchConnections(), fetchCompanies(), fetchSystemSettings()])
-      setConnections(connectionData)
-      setCompanies(companyData)
-      setDefaultSamplingIntervalSeconds(systemSettings.default_sampling_interval_seconds)
+      const requests = [fetchConnections()]
+      if (currentUser?.profile_name === 'Admin') { requests.push(fetchCompanies(), fetchSystemSettings()) }
+      const results = await Promise.all(requests)
+      setConnections(results[0])
+      if (currentUser?.profile_name === 'Admin') {
+        setCompanies(results[1] || [])
+        setDefaultSamplingIntervalSeconds(results[2]?.default_sampling_interval_seconds ?? null)
+      } else {
+        setCompanies([])
+        setDefaultSamplingIntervalSeconds(null)
+      }
     } catch (err) {
       setLoadError(err.message || 'Não foi possível carregar as conexões.')
     } finally {
@@ -902,7 +926,7 @@ function ConnectionPage({ isTestActive, onStartTest, runtimeStatuses }) {
 
   useEffect(() => {
     loadAll()
-  }, [])
+  }, [currentUser?.profile_name, currentUser?.company_id])
 
   const openNew = () => {
     setActionError('')
@@ -1102,7 +1126,7 @@ function ConnectionPage({ isTestActive, onStartTest, runtimeStatuses }) {
         <section className="connection-section">
           <div className="connection-section-title"><span>1</span><div><h3>Dados da conexão</h3><p>Parâmetros utilizados para conectar ao broker MQTT.</p></div></div>
           <div className="connection-grid">
-            <div className="form-group"><label>Empresa</label><select value={form.companyId} onChange={(e) => updateForm('companyId', e.target.value)} disabled={isSubmitting}><option value="">Selecione...</option>{companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}</select></div>
+            <div className="form-group"><label>Empresa</label>{currentUser?.profile_name === 'Admin' ? (<select value={form.companyId} onChange={(e) => updateForm('companyId', e.target.value)} disabled={isSubmitting || Boolean(form.id)}><option value="">Selecione...</option>{companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}</select>) : (<input value={currentUser?.company_name || 'Empresa atual'} disabled />)}</div>
             <div className="form-group"><label>Tipo</label><select value={form.type} disabled><option value="MQTT">MQTT</option></select></div>
             <div className="form-group"><label>Nome da conexão</label><input value={form.name} onChange={(e) => updateForm('name', e.target.value)} disabled={isSubmitting} placeholder="Ex.: MQTT Produção" /></div>
             <div className="form-group"><label>Host</label><input value={form.host} onChange={(e) => updateForm('host', e.target.value)} disabled={isSubmitting} /></div>
@@ -1796,19 +1820,17 @@ function InterpretationPage({ currentUser }) {
     setLoading(true)
     setError('')
     try {
-      const [companyResult, connectionResult] = await Promise.all([
-        fetchCompanies(),
-        fetchConnections(),
-      ])
-
-      const activeCompanies = companyResult.filter((company) => company.active)
+      const connectionResult = await fetchConnections()
       const activeConnections = connectionResult.filter((connection) => connection.active)
-      setCompanies(activeCompanies)
       setConnections(activeConnections)
 
       if (isAdmin) {
+        const companyResult = await fetchCompanies()
+        const activeCompanies = companyResult.filter((company) => company.active)
+        setCompanies(activeCompanies)
         setSelectedCompany(activeCompanies.length ? String(activeCompanies[0].id) : '')
       } else if (currentUser?.company_id) {
+        setCompanies([])
         setSelectedCompany(String(currentUser.company_id))
       }
     } catch (err) {
@@ -2189,10 +2211,10 @@ function DashboardWidget({ widget, onEdit, onDelete }) {
           <h3>{widget.name}</h3>
           <span>{data.metric || 'value'}{unit ? ` · ${unit}` : ''}</span>
         </div>
-        <div className="dashboard-widget-actions">
-          <button className="btn-small" onClick={() => onEdit(widget)}>Editar</button>
-          <button className="btn-small danger" onClick={() => onDelete(widget)}>Excluir</button>
-        </div>
+        {(onEdit || onDelete) && <div className="dashboard-widget-actions">
+          {onEdit && <button className="btn-small" onClick={() => onEdit(widget)}>Editar</button>}
+          {onDelete && <button className="btn-small danger" onClick={() => onDelete(widget)}>Excluir</button>}
+        </div>}
       </div>
 
       {widget.type === 'value' && (
@@ -2253,7 +2275,7 @@ function DashboardWidget({ widget, onEdit, onDelete }) {
   )
 }
 
-function DashboardPage() {
+function DashboardPage({ currentUser }) {
   const [dashboards, setDashboards] = useState([])
   const [companies, setCompanies] = useState([])
   const [dataSources, setDataSources] = useState([])
@@ -2270,6 +2292,9 @@ function DashboardPage() {
   })
   const [busy, setBusy] = useState(false)
   const [widgetValidationError, setWidgetValidationError] = useState('')
+  const isAdmin = currentUser?.profile_name === 'Admin'
+  const isManager = currentUser?.profile_name === 'Gerente'
+  const canManage = isAdmin || isManager
   const widgetNameRef = useRef(null)
 
 
@@ -2277,13 +2302,14 @@ function DashboardPage() {
     setLoading(true)
     setError('')
     try {
-      const [list, companyList, sourceList] = await Promise.all([
-        fetchDashboards(), fetchCompanies(), fetchDataSources(),
-      ])
-      setDashboards(list)
-      setCompanies(companyList)
-      setDataSources(sourceList)
-      const id = preferredId || selectedId || list.find((item) => item.is_default)?.id || list[0]?.id || null
+      const requests = [fetchDashboards()]
+      if (canManage) requests.push(fetchDataSources())
+      if (isAdmin) requests.push(fetchCompanies())
+      const results = await Promise.all(requests)
+      setDashboards(results[0])
+      setDataSources(canManage ? (results[1] || []) : [])
+      setCompanies(isAdmin ? (results[canManage ? 2 : 1] || []) : [])
+      const id = preferredId || selectedId || dashboards.find((item) => item.is_default)?.id || dashboards[0]?.id || null
       setSelectedId(id)
     } catch (err) {
       setError(err.message || 'Não foi possível carregar os dashboards.')
@@ -2304,7 +2330,7 @@ function DashboardPage() {
     }
   }
 
-  useEffect(() => { loadDashboards() }, [])
+  useEffect(() => { loadDashboards() }, [currentUser?.profile_name, currentUser?.company_id])
   useEffect(() => { if (selectedId) loadDashboard(selectedId) }, [selectedId])
 
   useEffect(() => {
@@ -2438,10 +2464,10 @@ function DashboardPage() {
           <h2>Dashboards</h2>
           <p className="page-description">Painéis de visualização construídos sobre as Measurements.</p>
         </div>
-        <button className="btn-test" onClick={() => {
-          setDashboardForm({ name: '', description: '', companyId: String(companies[0]?.id || ''), isDefault: dashboards.length === 0 })
+        {canManage && <button className="btn-test" onClick={() => {
+          setDashboardForm({ name: '', description: '', companyId: isAdmin ? String(companies[0]?.id || '') : String(currentUser?.company_id || ''), isDefault: dashboards.length === 0 })
           setShowDashboardForm(true)
-        }}>+ Novo Dashboard</button>
+        }}>+ Novo Dashboard</button>}
       </div>
 
       {error && <div className="test-status error"><p>{error}</p></div>}
@@ -2466,15 +2492,15 @@ function DashboardPage() {
                   <h2>{dashboard.name}</h2>
                   <p>{dashboard.description || 'Sem descrição.'} · {dashboard.company_name}</p>
                 </div>
-                <div className="dashboard-toolbar">
+                {canManage && <div className="dashboard-toolbar">
                   <button className="btn-small" onClick={openNewWidget}>+ Adicionar Widget</button>
                   <button className="btn-small danger" onClick={handleDashboardDelete} disabled={busy}>Excluir Dashboard</button>
-                </div>
+                </div>}
               </div>
 
               <div className="dashboard-grid">
                 {(dashboard.widgets || []).map((widget) => (
-                  <DashboardWidget key={widget.id} widget={widget} onEdit={openEditWidget} onDelete={handleWidgetDelete} />
+                  <DashboardWidget key={widget.id} widget={widget} onEdit={canManage ? openEditWidget : undefined} onDelete={canManage ? handleWidgetDelete : undefined} />
                 ))}
                 {!dashboard.widgets?.length && <div className="empty-state"><p>Adicione um widget para começar.</p></div>}
               </div>
@@ -2488,7 +2514,7 @@ function DashboardPage() {
           <form className="dashboard-modal" onSubmit={handleDashboardSubmit} onClick={(event) => event.stopPropagation()}>
             <h3>Novo Dashboard</h3>
             <div className="form-group"><label>Nome</label><input value={dashboardForm.name} onChange={(e) => setDashboardForm({ ...dashboardForm, name: e.target.value })} placeholder="Ex.: Produção" autoFocus /></div>
-            <div className="form-group"><label>Empresa</label><select value={dashboardForm.companyId} onChange={(e) => setDashboardForm({ ...dashboardForm, companyId: e.target.value })}><option value="">Selecione</option>{companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}</select></div>
+            <div className="form-group"><label>Empresa</label>{isAdmin ? (<select value={dashboardForm.companyId} onChange={(e) => setDashboardForm({ ...dashboardForm, companyId: e.target.value })}><option value="">Selecione</option>{companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}</select>) : (<input value={currentUser?.company_name || 'Empresa atual'} disabled />)}</div>
             <div className="form-group"><label>Descrição</label><input value={dashboardForm.description} onChange={(e) => setDashboardForm({ ...dashboardForm, description: e.target.value })} /></div>
             <label className="dashboard-check"><input type="checkbox" checked={dashboardForm.isDefault} onChange={(e) => setDashboardForm({ ...dashboardForm, isDefault: e.target.checked })} /> Dashboard padrão</label>
             <div className="dashboard-modal-actions"><button type="button" className="btn-small" onClick={() => setShowDashboardForm(false)}>Cancelar</button><button className="btn-test" disabled={busy}>Salvar</button></div>
@@ -2796,68 +2822,26 @@ function App() {
       <div className="app-container">
         <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
           <nav className="sidebar-nav">
-            <button
-              className={`nav-item ${currentPage === 'home' ? 'active' : ''}`}
-              onClick={() => handlePageChange('home')}
-            >
-              Início
-            </button>
-            <button
-              className={`nav-item ${currentPage === 'connection' ? 'active' : ''}`}
-              onClick={() => handlePageChange('connection')}
-            >
-              Conexão
-            </button>
-            <button
-              className={`nav-item ${currentPage === 'raw-messages' ? 'active' : ''}`}
-              onClick={() => handlePageChange('raw-messages')}
-            >
-              Mensagens Brutas
-            </button>
-            <button
-              className={`nav-item ${currentPage === 'measurements' ? 'active' : ''}`}
-              onClick={() => handlePageChange('measurements')}
-            >
-              Medições
-            </button>
-            <button
-              className={`nav-item ${currentPage === 'dashboards' ? 'active' : ''}`}
-              onClick={() => handlePageChange('dashboards')}
-            >
-              Dashboards
-            </button>
-            <button
-              className={`nav-item ${currentPage === 'interpretation' ? 'active' : ''}`}
-              onClick={() => handlePageChange('interpretation')}
-            >
-              Interpretação
-            </button>
-            <button
-              className={`nav-item ${currentPage === 'companies' ? 'active' : ''}`}
-              onClick={() => handlePageChange('companies')}
-            >
-              Empresas
-            </button>
-            <button
-              className={`nav-item ${currentPage === 'users' ? 'active' : ''}`}
-              onClick={() => handlePageChange('users')}
-            >
-              Usuários
-            </button>
-            {currentUser.profile_name === 'Admin' && (
-              <button
-                className={`nav-item ${currentPage === 'system-settings' ? 'active' : ''}`}
-                onClick={() => handlePageChange('system-settings')}
-              >
-                Parâmetros do Sistema
-              </button>
+            <button className={`nav-item ${currentPage === 'home' ? 'active' : ''}`} onClick={() => handlePageChange('home')}>Início</button>
+            {(currentUser.profile_name === 'Admin' || currentUser.profile_name === 'Gerente') && (
+              <button className={`nav-item ${currentPage === 'connection' ? 'active' : ''}`} onClick={() => handlePageChange('connection')}>Conexão</button>
             )}
-            <button
-              className={`nav-item ${currentPage === 'about' ? 'active' : ''}`}
-              onClick={() => handlePageChange('about')}
-            >
-              Ajuda / Sobre
-            </button>
+            <button className={`nav-item ${currentPage === 'raw-messages' ? 'active' : ''}`} onClick={() => handlePageChange('raw-messages')}>Mensagens Brutas</button>
+            <button className={`nav-item ${currentPage === 'measurements' ? 'active' : ''}`} onClick={() => handlePageChange('measurements')}>Medições</button>
+            <button className={`nav-item ${currentPage === 'dashboards' ? 'active' : ''}`} onClick={() => handlePageChange('dashboards')}>Dashboards</button>
+            {(currentUser.profile_name === 'Admin' || currentUser.profile_name === 'Gerente') && (
+              <button className={`nav-item ${currentPage === 'interpretation' ? 'active' : ''}`} onClick={() => handlePageChange('interpretation')}>Interpretação</button>
+            )}
+            {currentUser.profile_name === 'Admin' && (
+              <button className={`nav-item ${currentPage === 'companies' ? 'active' : ''}`} onClick={() => handlePageChange('companies')}>Empresas</button>
+            )}
+            {(currentUser.profile_name === 'Admin' || currentUser.profile_name === 'Gerente') && (
+              <button className={`nav-item ${currentPage === 'users' ? 'active' : ''}`} onClick={() => handlePageChange('users')}>Usuários</button>
+            )}
+            {currentUser.profile_name === 'Admin' && (
+              <button className={`nav-item ${currentPage === 'system-settings' ? 'active' : ''}`} onClick={() => handlePageChange('system-settings')}>Parâmetros do Sistema</button>
+            )}
+            <button className={`nav-item ${currentPage === 'about' ? 'active' : ''}`} onClick={() => handlePageChange('about')}>Ajuda / Sobre</button>
           </nav>
         </aside>
 
@@ -2866,14 +2850,14 @@ function App() {
         <main className="main-content">
           {currentPage === 'home' && <HomePage />}
           {currentPage === 'connection' && (
-            <ConnectionPage isTestActive={mqttTestSession.isOpen} onStartTest={startMqttTest} runtimeStatuses={connectionStatuses} />
+            <ConnectionPage isTestActive={mqttTestSession.isOpen} onStartTest={startMqttTest} runtimeStatuses={connectionStatuses} currentUser={currentUser} />
           )}
           {currentPage === 'raw-messages' && <RawMessagesPage />}
           {currentPage === 'measurements' && <MeasurementsPage />}
-          {currentPage === 'dashboards' && <DashboardPage />}
+          {currentPage === 'dashboards' && <DashboardPage currentUser={currentUser} />}
           {currentPage === 'interpretation' && <InterpretationPage currentUser={currentUser} />}
           {currentPage === 'companies' && <CompaniesPage />}
-          {currentPage === 'users' && <UsersPage />}
+          {currentPage === 'users' && <UsersPage currentUser={currentUser} />}
           {currentPage === 'system-settings' && currentUser.profile_name === 'Admin' && <SystemSettingsPage />}
           {currentPage === 'about' && <AboutPage />}
         </main>

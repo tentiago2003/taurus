@@ -1,6 +1,7 @@
 const repository = require('../db/repository');
 const { ApiError } = require('../http/errors');
 const { requireString, requireInt, optionalString } = require('./validation');
+const access = require('./access.service');
 
 const WIDGET_TYPES = ['value', 'chart', 'table'];
 
@@ -12,7 +13,7 @@ function validateWidgetType(type) {
 
 function getWidgetData(widget) {
   const configuration = widget.configuration || {};
-  const dataSourceIds = repository.widgets.listDataSourceIds(widget.id);
+  const dataSourceIds = widget.dataSourceIdsOverride || repository.widgets.listDataSourceIds(widget.id);
   const metric = configuration.metric || 'value';
   const periodHours = Number(configuration.period_hours || 24);
   const since = new Date(Date.now() - periodHours * 60 * 60 * 1000).toISOString();
@@ -56,27 +57,44 @@ function getWidgetData(widget) {
 }
 
 function hydrateDashboard(dashboard) {
-  const widgets = repository.widgets.listByDashboard(dashboard.id).map((widget) => ({
-    ...widget,
-    data_source_ids: repository.widgets.listDataSourceIds(widget.id),
-    data: getWidgetData(widget),
-  }));
+  const widgets = repository.widgets.listByDashboard(dashboard.id).map((widget) => {
+    const dataSourceIds = repository.widgets.listDataSourceIds(widget.id)
+      .filter((dataSourceId) => Number(access.companyIdFromDataSource(dataSourceId)) === Number(dashboard.company_id));
+    const scopedWidget = { ...widget };
+    const data = getWidgetData({ ...scopedWidget, dataSourceIdsOverride: dataSourceIds });
+    return { ...scopedWidget, data_source_ids: dataSourceIds, data };
+  });
   return { ...dashboard, widgets };
 }
 
-function list() {
+function list(user) {
   ensureDemoDashboard();
-  return repository.dashboards.list();
+
+  if (!user) {
+    return repository.dashboards.list();
+  }
+
+  if (user.profile_name === 'Admin') {
+    return repository.dashboards.list();
+  }
+
+  return repository.dashboards.listByCompany(Number(user.company_id)).map((dashboard) => ({
+    ...dashboard,
+    company_name: repository.companies.findById(dashboard.company_id)?.name || null
+  }));
 }
 
-function get(id) {
+function get(id, user) {
   const dashboard = repository.dashboards.findById(id);
   if (!dashboard) throw new ApiError(404, 'Dashboard não encontrado.');
+  access.ensureCompanyAccess(user, dashboard.company_id);
   return hydrateDashboard(dashboard);
 }
 
-function create(payload = {}, createdBy = null) {
-  const companyId = requireInt(payload.companyId, 'companyId');
+function create(payload = {}, createdBy = null, user = null) {
+  access.ensureAdminOrManager(user);
+  const requestedCompanyId = payload.companyId === undefined || payload.companyId === null || payload.companyId === '' ? null : requireInt(payload.companyId, 'companyId');
+  const companyId = access.resolveCompanyIdForWrite(user, requestedCompanyId);
   const name = requireString(payload.name, 'name');
   const description = optionalString(payload.description);
   const isDefault = Boolean(payload.isDefault);
@@ -88,20 +106,26 @@ function create(payload = {}, createdBy = null) {
   return repository.dashboards.create({ companyId, name, description, isDefault, createdBy });
 }
 
-function update(id, payload = {}, updatedBy = null) {
-  if (!repository.dashboards.findById(id)) throw new ApiError(404, 'Dashboard não encontrado.');
+function update(id, payload = {}, updatedBy = null, user = null) {
+  const existing = repository.dashboards.findById(id);
+  if (!existing) throw new ApiError(404, 'Dashboard não encontrado.');
+  access.ensureAdminOrManager(user);
+  access.ensureCompanyAccess(user, existing.company_id);
   const name = requireString(payload.name, 'name');
   const description = optionalString(payload.description);
   const isDefault = Boolean(payload.isDefault);
   return repository.dashboards.update({ id, name, description, isDefault, updatedBy });
 }
 
-function remove(id) {
-  if (!repository.dashboards.findById(id)) throw new ApiError(404, 'Dashboard não encontrado.');
+function remove(id, user) {
+  const existing = repository.dashboards.findById(id);
+  if (!existing) throw new ApiError(404, 'Dashboard não encontrado.');
+  access.ensureAdminOrManager(user);
+  access.ensureCompanyAccess(user, existing.company_id);
   repository.dashboards.remove(id);
 }
 
-function createWidget(payload = {}, userId = null) {
+function createWidget(payload = {}, userId = null, user = null) {
   const dashboardId = requireInt(payload.dashboardId, 'dashboardId');
   const name = requireString(payload.name, 'name');
   const type = requireString(payload.type, 'type');
@@ -112,17 +136,14 @@ function createWidget(payload = {}, userId = null) {
     ? [...new Set(payload.dataSourceIds.map(Number).filter(Number.isInteger))]
     : [];
 
-  if (!repository.dashboards.findById(dashboardId)) {
-    throw new ApiError(400, 'Dashboard informado não existe.');
-  }
+  const dashboard = repository.dashboards.findById(dashboardId);
+  if (!dashboard) throw new ApiError(400, 'Dashboard informado não existe.');
+  access.ensureAdminOrManager(user);
+  access.ensureCompanyAccess(user, dashboard.company_id);
   if (dataSourceIds.length === 0) {
     throw new ApiError(400, 'Selecione ao menos uma Data Source.');
   }
-  for (const dataSourceId of dataSourceIds) {
-    if (!repository.dataSources.findById(dataSourceId)) {
-      throw new ApiError(400, `Data Source ${dataSourceId} não existe.`);
-    }
-  }
+  access.ensureDataSourcesSameCompany(dataSourceIds, dashboard.company_id);
 
   return repository.widgets.create({
     dashboardId,
@@ -135,9 +156,12 @@ function createWidget(payload = {}, userId = null) {
   });
 }
 
-function updateWidget(id, payload = {}, userId = null) {
+function updateWidget(id, payload = {}, userId = null, user = null) {
   const existing = repository.widgets.findById(id);
   if (!existing) throw new ApiError(404, 'Widget não encontrado.');
+  const dashboardCompanyId = access.companyIdFromWidget(id);
+  access.ensureAdminOrManager(user);
+  access.ensureCompanyAccess(user, dashboardCompanyId);
   const name = requireString(payload.name, 'name');
   const type = requireString(payload.type, 'type');
   validateWidgetType(type);
@@ -148,17 +172,16 @@ function updateWidget(id, payload = {}, userId = null) {
     : repository.widgets.listDataSourceIds(id);
 
   if (dataSourceIds.length === 0) throw new ApiError(400, 'Selecione ao menos uma Data Source.');
-  for (const dataSourceId of dataSourceIds) {
-    if (!repository.dataSources.findById(dataSourceId)) {
-      throw new ApiError(400, `Data Source ${dataSourceId} não existe.`);
-    }
-  }
+  access.ensureDataSourcesSameCompany(dataSourceIds, dashboardCompanyId);
 
   return repository.widgets.update({ id, name, type, position, configuration, dataSourceIds, updatedBy: userId });
 }
 
-function removeWidget(id) {
-  if (!repository.widgets.findById(id)) throw new ApiError(404, 'Widget não encontrado.');
+function removeWidget(id, user) {
+  const existing = repository.widgets.findById(id);
+  if (!existing) throw new ApiError(404, 'Widget não encontrado.');
+  access.ensureAdminOrManager(user);
+  access.ensureCompanyAccess(user, access.companyIdFromWidget(id));
   repository.widgets.remove(id);
 }
 

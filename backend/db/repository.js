@@ -198,6 +198,31 @@ const rawMessages = {
                 ORDER BY received_at DESC, id DESC LIMIT ?`)
       .all(dataSourceId, limit);
   },
+  listRecentPagedByCompany(companyId, { topic = null, from = null, to = null, page = 1, pageSize = 50 } = {}) {
+    const safePage = Math.max(Number(page) || 1, 1);
+    const safePageSize = Math.min(Math.max(Number(pageSize) || 50, 1), 200);
+    const where = ['cn.company_id = ?'];
+    const params = [companyId];
+    if (topic) { where.push('rm.topic LIKE ?'); params.push(`%${topic}%`); }
+    if (from) { where.push('rm.received_at >= ?'); params.push(from); }
+    if (to) { where.push('rm.received_at <= ?'); params.push(to); }
+    const clause = `WHERE ${where.join(' AND ')}`;
+    const db = getDatabase();
+    const countRow = db.prepare(`SELECT COUNT(*) AS count FROM raw_messages rm JOIN data_sources ds ON ds.id = rm.data_source_id JOIN connections cn ON cn.id = ds.connection_id ${clause}`).get(...params);
+    const rows = db.prepare(
+      `SELECT rm.*, ds.name AS data_source_name, ds.topic AS data_source_topic, ds.connection_id,
+              cn.name AS connection_name,
+              length(rm.payload) AS payload_size_bytes
+       FROM raw_messages rm
+       JOIN data_sources ds ON ds.id = rm.data_source_id
+       JOIN connections cn ON cn.id = ds.connection_id
+       ${clause}
+       ORDER BY rm.received_at DESC, rm.id DESC
+       LIMIT ? OFFSET ?`
+    ).all(...params, safePageSize, (safePage - 1) * safePageSize).map((row) => parseJson(row, []));
+    return { rows, total: Number(countRow.count), page: safePage, pageSize: safePageSize, totalPages: Math.max(Math.ceil(Number(countRow.count) / safePageSize), 1) };
+  },
+
   listRecentPaged({ dataSourceId = null, topic = null, from = null, to = null, page = 1, pageSize = 50 } = {}) {
     const safePageSize = Math.min(Math.max(Number.parseInt(pageSize, 10) || 50, 1), 100);
     const safePage = Math.max(Number.parseInt(page, 10) || 1, 1);
@@ -280,6 +305,29 @@ const measurements = {
       .all(dataSourceId, limit)
       .map((row) => parseJson(row));
   },
+  listPagedByCompany(companyId, { metric = null, from = null, to = null, page = 1, pageSize = 50 } = {}) {
+    const safePage = Math.max(Number(page) || 1, 1);
+    const safePageSize = Math.min(Math.max(Number(pageSize) || 50, 1), 200);
+    const where = ['cn.company_id = ?'];
+    const params = [companyId];
+    if (metric) { where.push('m.metric LIKE ?'); params.push(`%${metric}%`); }
+    if (from) { where.push('m.timestamp >= ?'); params.push(from); }
+    if (to) { where.push('m.timestamp <= ?'); params.push(to); }
+    const clause = `WHERE ${where.join(' AND ')}`;
+    const db = getDatabase();
+    const countRow = db.prepare(`SELECT COUNT(*) AS count FROM measurements m JOIN data_sources ds ON ds.id = m.data_source_id JOIN connections cn ON cn.id = ds.connection_id ${clause}`).get(...params);
+    const rows = db.prepare(
+      `SELECT m.*, ds.name AS data_source_name, ds.topic AS data_source_topic
+       FROM measurements m
+       JOIN data_sources ds ON ds.id = m.data_source_id
+       JOIN connections cn ON cn.id = ds.connection_id
+       ${clause}
+       ORDER BY m.timestamp DESC, m.id DESC
+       LIMIT ? OFFSET ?`
+    ).all(...params, safePageSize, (safePage - 1) * safePageSize).map((row) => parseJson(row));
+    return { rows, total: Number(countRow.count), page: safePage, pageSize: safePageSize, totalPages: Math.max(Math.ceil(Number(countRow.count) / safePageSize), 1) };
+  },
+
   listPaged({ dataSourceId = null, metric = null, from = null, to = null, page = 1, pageSize = 50 } = {}) {
     const safePage = Math.max(Number(page) || 1, 1);
     const safePageSize = Math.min(Math.max(Number(pageSize) || 50, 1), 200);

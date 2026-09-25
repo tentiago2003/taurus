@@ -2,12 +2,12 @@ const service = require('../services/profiles.service');
 const { readJsonBody, sendJson } = require('../http/utils');
 
 async function list(req, res) {
-  sendJson(res, 200, service.list());
+  sendJson(res, 200, service.list(req.user));
 }
 
 async function create(req, res) {
   const body = await readJsonBody(req);
-  const created = service.create(body);
+  const created = service.create(body, req.user);
   sendJson(res, 201, created);
 }
 
