@@ -429,6 +429,12 @@ function UsersPage({ currentUser }) {
   const [editingId, setEditingId] = useState(null)
   const [editForm, setEditForm] = useState(emptyUserForm)
   const [busyId, setBusyId] = useState(null)
+  const [userFilters, setUserFilters] = useState({
+    text: '',
+    profileId: '',
+    companyId: '',
+    status: '',
+  })
   const isAdmin = currentUser?.profile_name === 'Admin'
   const isManager = currentUser?.profile_name === 'Gerente'
   const isAdminOrManager = isAdmin || isManager
@@ -438,6 +444,32 @@ function UsersPage({ currentUser }) {
 
   const profileName = (profileId) => profiles.find((p) => p.id === profileId)?.name || '—'
   const companyName = (companyId) => companies.find((c) => c.id === companyId)?.name || (currentUser?.company_id && Number(currentUser.company_id) === Number(companyId) ? (currentUser.company_name || 'Empresa atual') : '—')
+
+  const filteredUsers = users.filter((user) => {
+    const search = userFilters.text.trim().toLowerCase()
+    const matchesText = !search
+      || String(user.name || '').toLowerCase().includes(search)
+      || String(user.email || '').toLowerCase().includes(search)
+
+    const matchesProfile = !userFilters.profileId || Number(user.profile_id) === Number(userFilters.profileId)
+    const matchesCompany = !userFilters.companyId || Number(user.company_id) === Number(userFilters.companyId)
+    const matchesStatus = !userFilters.status
+      || (userFilters.status === 'active' && Boolean(user.active))
+      || (userFilters.status === 'inactive' && !user.active)
+
+    return matchesText && matchesProfile && matchesCompany && matchesStatus
+  })
+
+  const hasUserFilters = Object.values(userFilters).some((value) => value !== '')
+
+  const clearUserFilters = () => {
+    setUserFilters({
+      text: '',
+      profileId: '',
+      companyId: '',
+      status: '',
+    })
+  }
 
   const loadAll = async () => {
     setIsLoading(true)
@@ -736,6 +768,89 @@ function UsersPage({ currentUser }) {
         </div>
       )}
 
+      {!isLoading && users.length > 0 && (
+        <div className="users-filters-panel">
+          <div className="users-filters-header">
+            <strong>Filtros</strong>
+            <span>
+              Exibindo {filteredUsers.length} de {users.length} usuário{users.length === 1 ? '' : 's'}.
+            </span>
+          </div>
+
+          <div className="users-filters-grid">
+            <div className="form-group">
+              <label htmlFor="user-filter-text">Nome ou e-mail</label>
+              <input
+                type="text"
+                id="user-filter-text"
+                value={userFilters.text}
+                onChange={(e) => setUserFilters((prev) => ({ ...prev, text: e.target.value }))}
+                placeholder="Digite parte do nome ou e-mail"
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="user-filter-profile">Perfil</label>
+              <select
+                id="user-filter-profile"
+                value={userFilters.profileId}
+                onChange={(e) => setUserFilters((prev) => ({ ...prev, profileId: e.target.value }))}
+              >
+                <option value="">Todos</option>
+                {profiles.map((profile) => (
+                  <option key={profile.id} value={profile.id}>
+                    {profile.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="user-filter-company">Empresa</label>
+              <select
+                id="user-filter-company"
+                value={userFilters.companyId}
+                onChange={(e) => setUserFilters((prev) => ({ ...prev, companyId: e.target.value }))}
+              >
+                <option value="">Todas</option>
+                {isAdmin
+                  ? companies.map((company) => (
+                      <option key={company.id} value={company.id}>
+                        {company.name}
+                      </option>
+                    ))
+                  : currentUser?.company_id && (
+                      <option value={currentUser.company_id}>
+                        {currentUser.company_name || 'Empresa atual'}
+                      </option>
+                    )}
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="user-filter-status">Status</label>
+              <select
+                id="user-filter-status"
+                value={userFilters.status}
+                onChange={(e) => setUserFilters((prev) => ({ ...prev, status: e.target.value }))}
+              >
+                <option value="">Todos</option>
+                <option value="active">Ativo</option>
+                <option value="inactive">Inativo</option>
+              </select>
+            </div>
+
+            <div className="users-filters-actions">
+              {hasUserFilters && (
+                <button type="button" className="btn-test" onClick={clearUserFilters}>
+                  Limpar filtros
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {isLoading ? (
         <div className="empty-state">
           <p>Carregando usuários...</p>
@@ -746,6 +861,10 @@ function UsersPage({ currentUser }) {
             <p>Nenhum usuário cadastrado.</p>
           </div>
         )
+      ) : filteredUsers.length === 0 ? (
+        <div className="empty-state">
+          <p>Nenhum usuário corresponde aos filtros informados.</p>
+        </div>
       ) : (
         <div className="slaves-container">
           <table className="slaves-table">
@@ -761,7 +880,7 @@ function UsersPage({ currentUser }) {
               </tr>
             </thead>
             <tbody>
-              {users.map((user) => (
+              {filteredUsers.map((user) => (
                 <tr key={user.id}>
                   <td>{user.id}</td>
                   {editingId === user.id ? (
