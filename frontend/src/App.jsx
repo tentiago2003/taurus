@@ -3059,7 +3059,10 @@ function App() {
         </div>
         {currentUser && (
           <div className="header-user">
-            <span>{currentUser.name}</span>
+            <div className="header-user-info">
+              <strong>{currentUser.name}</strong>
+              <span>{currentUser.company_name || 'Sem empresa'}</span>
+            </div>
             <button className="btn-small" onClick={handleLogout}>Sair</button>
           </div>
         )}
