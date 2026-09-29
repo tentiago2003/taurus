@@ -40,6 +40,7 @@ test('cria dashboard de demonstração a partir de medições existentes', () =>
 
   assert.equal(dashboards.length, 1);
   assert.equal(dashboards[0].name, 'Monitoramento de Temperaturas');
+  assert.equal(dashboards[0].description, 'Dashboard criado automaticamente com as medições existentes.');
   assert.equal(dashboards[0].is_default, 1);
 
   const dashboard = service.get(dashboards[0].id);
@@ -52,6 +53,35 @@ test('cria dashboard de demonstração a partir de medições existentes', () =>
   assert.equal(dashboard.widgets[1].data.sources[0].latest.value, 20.8);
   assert.equal(dashboard.widgets[0].data.size, '1x1');
   assert.equal(dashboard.widgets[2].data.size, '2x2');
+});
+
+
+test('atualiza a descrição antiga do dashboard automático sem alterar dashboards existentes', () => {
+  const db = getDatabase();
+  const company = db.prepare('INSERT INTO companies (name) VALUES (?)').run('Empresa Demo Atualização');
+  const companyId = Number(company.lastInsertRowid);
+  const connection = db.prepare(
+    `INSERT INTO connections (company_id, name, type, configuration) VALUES (?, ?, ?, ?)`
+  ).run(companyId, 'Conexão Demo Atualização', 'mqtt', '{}');
+  const connectionId = Number(connection.lastInsertRowid);
+  const source = db.prepare(
+    `INSERT INTO data_sources (connection_id, name, type, topic) VALUES (?, ?, ?, ?)`
+  ).run(connectionId, 'LoRa1', 'lorawan', 'demo/topic');
+  const sourceId = Number(source.lastInsertRowid);
+
+  db.prepare(
+    `INSERT INTO measurements (data_source_id, metric, timestamp, value) VALUES (?, ?, ?, ?)`
+  ).run(sourceId, 'temperature_1', new Date().toISOString(), 21.5);
+
+  const service = require('../services/dashboards.service');
+  const dashboard = service.list()[0];
+
+  db.prepare(
+    `UPDATE dashboards SET description = ? WHERE id = ?`
+  ).run('Dashboard de demonstração criado automaticamente com as medições existentes.', dashboard.id);
+
+  const refreshed = service.list()[0];
+  assert.equal(refreshed.description, 'Dashboard criado automaticamente com as medições existentes.');
 });
 
 

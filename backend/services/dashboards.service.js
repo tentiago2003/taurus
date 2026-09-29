@@ -200,12 +200,23 @@ function ensureDemoDashboard() {
   if (!candidates.length) return null;
   const companyId = candidates[0].company_id;
   const existing = repository.dashboards.listByCompany(companyId);
-  if (existing.length) return existing[0];
+  if (existing.length) {
+    const generated = existing[0];
+    if (generated.description === 'Dashboard de demonstração criado automaticamente com as medições existentes.') {
+      return repository.dashboards.update({
+        id: generated.id,
+        name: generated.name,
+        description: 'Dashboard criado automaticamente com as medições existentes.',
+        isDefault: generated.is_default,
+      });
+    }
+    return generated;
+  }
 
   const dashboard = repository.dashboards.create({
     companyId,
     name: 'Monitoramento de Temperaturas',
-    description: 'Dashboard de demonstração criado automaticamente com as medições existentes.',
+    description: 'Dashboard criado automaticamente com as medições existentes.',
     isDefault: 1,
   });
 
