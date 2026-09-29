@@ -4,6 +4,7 @@ const { asyncHandler } = require('../http/utils');
 function register(router) {
   router.post('/api/auth/login', asyncHandler(controller.login));
   router.get('/api/auth/me', asyncHandler(controller.me));
+  router.put('/api/auth/me', asyncHandler(controller.updateMe));
   router.post('/api/auth/logout', asyncHandler(controller.logout));
 }
 

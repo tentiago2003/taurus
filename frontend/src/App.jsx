@@ -24,6 +24,7 @@ import {
   login,
   fetchCurrentUser,
   logout,
+  updateCurrentUser,
   fetchSystemSettings,
   updateSystemSettings,
   fetchRawMessages,
@@ -406,7 +407,7 @@ function CompaniesPage() {
 
 const ADMIN_PROFILE_NAME = 'Admin'
 
-const emptyUserForm = { name: '', email: '', profileId: '', companyId: '', password: '' }
+const emptyUserForm = { name: '', email: '', profileId: '', companyId: '', password: '', passwordConfirmation: '' }
 
 function UsersPage({ currentUser }) {
   const [users, setUsers] = useState([])
@@ -421,6 +422,8 @@ function UsersPage({ currentUser }) {
   const [events, setEvents] = useState([])
   const [eventsLoading, setEventsLoading] = useState(false)
   const [formError, setFormError] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
+  const [showEditPassword, setShowEditPassword] = useState(false)
 
   const [actionError, setActionError] = useState('')
   const [editingId, setEditingId] = useState(null)
@@ -466,8 +469,12 @@ function UsersPage({ currentUser }) {
     e.preventDefault()
     setFormError('')
 
-    if (!form.name.trim() || !form.email.trim() || !form.profileId || !form.password.trim()) {
-      setFormError('Preencha nome, e-mail, perfil e senha.')
+    if (!form.name.trim() || !form.email.trim() || !form.profileId || !form.password.trim() || !form.passwordConfirmation.trim()) {
+      setFormError('Preencha nome, e-mail, perfil, senha e confirmação da senha.')
+      return
+    }
+    if (form.password !== form.passwordConfirmation) {
+      setFormError('A confirmação da senha não confere.')
       return
     }
     if (!isAdminProfile(form.profileId) && !form.companyId && !isManager) {
@@ -483,6 +490,7 @@ function UsersPage({ currentUser }) {
         profileId: Number(form.profileId),
         companyId: isManager ? Number(currentUser.company_id) : (form.companyId ? Number(form.companyId) : null),
         password: form.password,
+        passwordConfirmation: form.passwordConfirmation,
       })
       setForm(emptyUserForm)
       await loadAll()
@@ -496,18 +504,21 @@ function UsersPage({ currentUser }) {
   const startEditing = (user) => {
     setActionError('')
     setEditingId(user.id)
+    setShowEditPassword(false)
     setEditForm({
-      name: user.name,
-      email: user.email,
-      profileId: String(user.profile_id),
-      companyId: user.company_id ? String(user.company_id) : '',
-      password: '',
-    })
+        name: user.name,
+        email: user.email,
+        profileId: String(user.profile_id),
+        companyId: user.company_id ? String(user.company_id) : '',
+        password: '',
+        passwordConfirmation: '',
+          })
   }
 
   const cancelEditing = () => {
     setEditingId(null)
     setEditForm(emptyUserForm)
+    setShowEditPassword(false)
   }
 
   const handleEditChange = (e) => {
@@ -535,7 +546,18 @@ function UsersPage({ currentUser }) {
         companyId: isManager ? Number(currentUser.company_id) : (editForm.companyId ? Number(editForm.companyId) : null),
       }
       if (editForm.password.trim()) {
+        if (!editForm.passwordConfirmation.trim()) {
+          setActionError('Informe a confirmação da nova senha.')
+          setBusyId(null)
+          return
+        }
+        if (editForm.password !== editForm.passwordConfirmation) {
+          setActionError('A confirmação da senha não confere.')
+          setBusyId(null)
+          return
+        }
         payload.password = editForm.password.trim()
+        payload.passwordConfirmation = editForm.passwordConfirmation.trim()
       }
       await updateUser(userId, payload)
       cancelEditing()
@@ -663,13 +685,29 @@ function UsersPage({ currentUser }) {
 
           <div className="form-group">
             <label htmlFor="user-password">Senha</label>
+            <div className="password-input-wrap">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                id="user-password"
+                name="password"
+                value={form.password}
+                onChange={handleFormChange}
+                placeholder="Senha"
+                disabled={isSubmitting}
+              />
+              <button type="button" className="password-toggle" onClick={() => setShowPassword((value) => !value)} disabled={isSubmitting}>{showPassword ? 'Ocultar' : 'Mostrar'}</button>
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="user-password-confirmation">Confirmar senha</label>
             <input
-              type="password"
-              id="user-password"
-              name="password"
-              value={form.password}
+              type={showPassword ? 'text' : 'password'}
+              id="user-password-confirmation"
+              name="passwordConfirmation"
+              value={form.passwordConfirmation}
               onChange={handleFormChange}
-              placeholder="Senha"
+              placeholder="Repita a senha"
               disabled={isSubmitting}
             />
           </div>
@@ -784,12 +822,23 @@ function UsersPage({ currentUser }) {
                       </td>
                       <td>
                         <div className="table-actions">
+                          <div className="password-input-wrap">
+                            <input
+                              type={showEditPassword ? 'text' : 'password'}
+                              name="password"
+                              value={editForm.password}
+                              onChange={handleEditChange}
+                              placeholder="Nova senha (opcional)"
+                              disabled={busyId === user.id}
+                            />
+                            <button type="button" className="password-toggle" onClick={() => setShowEditPassword((value) => !value)} disabled={busyId === user.id}>{showEditPassword ? 'Ocultar' : 'Mostrar'}</button>
+                          </div>
                           <input
-                            type="password"
-                            name="password"
-                            value={editForm.password}
+                            type={showEditPassword ? 'text' : 'password'}
+                            name="passwordConfirmation"
+                            value={editForm.passwordConfirmation}
                             onChange={handleEditChange}
-                            placeholder="Nova senha (opcional)"
+                            placeholder="Confirmar nova senha"
                             disabled={busyId === user.id}
                           />
                           <button
@@ -2140,6 +2189,84 @@ function InterpretationPage({ currentUser }) {
   )
 }
 
+function ProfilePage({ currentUser, onUserUpdated }) {
+  const [form, setForm] = useState({ name: currentUser?.name || '', email: currentUser?.email || '', password: '', passwordConfirmation: '' })
+  const [showPassword, setShowPassword] = useState(false)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    setForm({ name: currentUser?.name || '', email: currentUser?.email || '', password: '', passwordConfirmation: '' })
+  }, [currentUser?.id, currentUser?.name, currentUser?.email])
+
+  const handleSubmit = async (event) => {
+    event.preventDefault()
+    setError('')
+    setSuccess('')
+    if (!form.name.trim() || !form.email.trim()) {
+      setError('Nome e e-mail são obrigatórios.')
+      return
+    }
+    if (form.password && !form.passwordConfirmation) {
+      setError('Informe a confirmação da nova senha.')
+      return
+    }
+    if (form.password && form.password !== form.passwordConfirmation) {
+      setError('A confirmação da senha não confere.')
+      return
+    }
+    setBusy(true)
+    try {
+      const result = await updateCurrentUser({
+        name: form.name.trim(),
+        email: form.email.trim(),
+        ...(form.password ? { password: form.password, passwordConfirmation: form.passwordConfirmation } : {}),
+      })
+      onUserUpdated(result.user)
+      setForm((prev) => ({ ...prev, password: '', passwordConfirmation: '' }))
+      setSuccess('Dados atualizados com sucesso.')
+    } catch (err) {
+      setError(err.message || 'Não foi possível atualizar seus dados.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="page-content">
+      <h2>Meu perfil</h2>
+      <p className="page-description">Atualize seu nome, e-mail ou senha.</p>
+      <div className="connection-form">
+        <form onSubmit={handleSubmit}>
+          <div className="form-group">
+            <label htmlFor="profile-name">Nome</label>
+            <input id="profile-name" type="text" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} disabled={busy} />
+          </div>
+          <div className="form-group">
+            <label htmlFor="profile-email">E-mail</label>
+            <input id="profile-email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} disabled={busy} />
+          </div>
+          <div className="form-group">
+            <label htmlFor="profile-password">Nova senha</label>
+            <div className="password-input-wrap">
+              <input id="profile-password" type={showPassword ? 'text' : 'password'} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="Deixe em branco para manter" disabled={busy} />
+              <button type="button" className="password-toggle" onClick={() => setShowPassword((value) => !value)} disabled={busy}>{showPassword ? 'Ocultar' : 'Mostrar'}</button>
+            </div>
+          </div>
+          <div className="form-group">
+            <label htmlFor="profile-password-confirmation">Confirmar nova senha</label>
+            <input id="profile-password-confirmation" type={showPassword ? 'text' : 'password'} value={form.passwordConfirmation} onChange={(e) => setForm({ ...form, passwordConfirmation: e.target.value })} placeholder="Repita a nova senha" disabled={busy} />
+          </div>
+          {error && <div className="test-status error"><p>{error}</p></div>}
+          {success && <div className="test-status success"><p>{success}</p></div>}
+          <button className="btn-test" type="submit" disabled={busy}>{busy ? 'Salvando...' : 'Salvar alterações'}</button>
+        </form>
+      </div>
+    </div>
+  )
+}
+
 function AboutPage() {
   return (
     <div className="page-content">
@@ -2841,6 +2968,7 @@ function App() {
             {currentUser.profile_name === 'Admin' && (
               <button className={`nav-item ${currentPage === 'system-settings' ? 'active' : ''}`} onClick={() => handlePageChange('system-settings')}>Parâmetros do Sistema</button>
             )}
+            <button className={`nav-item ${currentPage === 'profile' ? 'active' : ''}`} onClick={() => handlePageChange('profile')}>Meu perfil</button>
             <button className={`nav-item ${currentPage === 'about' ? 'active' : ''}`} onClick={() => handlePageChange('about')}>Ajuda / Sobre</button>
           </nav>
         </aside>
@@ -2858,6 +2986,7 @@ function App() {
           {currentPage === 'interpretation' && <InterpretationPage currentUser={currentUser} />}
           {currentPage === 'companies' && <CompaniesPage />}
           {currentPage === 'users' && <UsersPage currentUser={currentUser} />}
+          {currentPage === 'profile' && <ProfilePage currentUser={currentUser} onUserUpdated={setCurrentUser} />}
           {currentPage === 'system-settings' && currentUser.profile_name === 'Admin' && <SystemSettingsPage />}
           {currentPage === 'about' && <AboutPage />}
         </main>

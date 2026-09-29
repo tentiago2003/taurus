@@ -56,6 +56,8 @@ function create(payload = {}, actor) {
   const name = requireString(payload.name, 'name');
   const email = requireEmail(payload.email);
   const password = requireString(payload.password, 'password');
+  const passwordConfirmation = requireString(payload.passwordConfirmation, 'passwordConfirmation');
+  if (password !== passwordConfirmation) throw new ApiError(400, 'A confirmação da senha não confere.');
   const profileId = requireInt(payload.profileId, 'profileId');
   const profile = resolveProfile(profileId);
   access.ensureUserProfileForManager(actor, profile);
@@ -90,7 +92,13 @@ function update(id, payload = {}, actor) {
   ensureCompanyRule(profile, companyId);
   ensureEmailAvailable(email, id);
 
-  const passwordHash = payload.password ? hashPassword(requireString(payload.password, 'password')) : null;
+  let passwordHash = null;
+  if (payload.password) {
+    const password = requireString(payload.password, 'password');
+    const passwordConfirmation = requireString(payload.passwordConfirmation, 'passwordConfirmation');
+    if (password !== passwordConfirmation) throw new ApiError(400, 'A confirmação da senha não confere.');
+    passwordHash = hashPassword(password);
+  }
   return sanitize(repository.users.update({
     id,
     companyId,

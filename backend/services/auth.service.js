@@ -2,7 +2,7 @@ const crypto = require('crypto');
 const repository = require('../db/repository');
 const { ApiError } = require('../http/errors');
 const { requireEmail, requireString } = require('./validation');
-const { verifyPassword } = require('./password');
+const { verifyPassword, hashPassword } = require('./password');
 
 const sessions = new Map();
 const SESSION_COOKIE = 'taurus_session';
@@ -66,6 +66,41 @@ function getUserFromRequest(req) {
   return publicUser(user);
 }
 
+function updateCurrentUser(req, payload = {}) {
+  const currentUser = getUserFromRequest(req);
+  if (!currentUser) throw new ApiError(401, 'Sessão inválida.');
+
+  const name = requireString(payload.name, 'name');
+  const email = requireEmail(payload.email);
+  const existing = repository.users.findById(currentUser.id);
+  if (!existing) throw new ApiError(404, 'Usuário não encontrado.');
+
+  const emailOwner = repository.users.findByEmail(email);
+  if (emailOwner && Number(emailOwner.id) !== Number(existing.id)) {
+    throw new ApiError(409, 'Já existe um usuário com este e-mail.');
+  }
+
+  let passwordHash = null;
+  if (payload.password) {
+    const password = requireString(payload.password, 'password');
+    const passwordConfirmation = requireString(payload.passwordConfirmation, 'passwordConfirmation');
+    if (password !== passwordConfirmation) throw new ApiError(400, 'A confirmação da senha não confere.');
+    passwordHash = hashPassword(password);
+  }
+
+  const updated = repository.users.update({
+    id: existing.id,
+    companyId: existing.company_id,
+    profileId: existing.profile_id,
+    name,
+    email,
+    passwordHash,
+    updatedBy: existing.id,
+  });
+
+  return publicUser(updated);
+}
+
 function logout(req) {
   const cookies = parseCookies(req);
   const token = cookies[SESSION_COOKIE];
@@ -84,6 +119,7 @@ module.exports = {
   SESSION_COOKIE,
   login,
   getUserFromRequest,
+  updateCurrentUser,
   logout,
   setSessionCookie,
   clearSessionCookie,

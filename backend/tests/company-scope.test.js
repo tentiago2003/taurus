@@ -61,11 +61,11 @@ test('Dashboard e widgets não cruzam empresa', () => {
 });
 
 test('Gerente administra usuários apenas da própria empresa', () => {
-  const created = users.create({ name: 'Novo A', email: 'novo-a@local.test', password: 'senha', profileId: viewerProfile.id }, a);
+  const created = users.create({ name: 'Novo A', email: 'novo-a@local.test', password: 'senha', passwordConfirmation: 'senha', profileId: viewerProfile.id }, a);
   assert.equal(created.company_id, companyA.id);
-  assert.throws(() => users.create({ name: 'Novo B', email: 'novo-b@local.test', password: 'senha', profileId: viewerProfile.id, companyId: companyB.id }, a), (err) => err.status === 403);
-  assert.throws(() => users.update(managerB.id, { name: 'X', email: 'x@local', password: 'senha', profileId: managerProfile.id, companyId: companyB.id }, a), (err) => err.status === 403);
-  assert.throws(() => users.create({ name: 'Admin indevido', email: 'bad-admin@local.test', password: 'senha', profileId: adminProfile.id, companyId: companyA.id }, a), (err) => err.status === 403);
+  assert.throws(() => users.create({ name: 'Novo B', email: 'novo-b@local.test', password: 'senha', passwordConfirmation: 'senha', profileId: viewerProfile.id, companyId: companyB.id }, a), (err) => err.status === 403);
+  assert.throws(() => users.update(managerB.id, { name: 'X', email: 'x@local', password: 'senha', passwordConfirmation: 'senha', profileId: managerProfile.id, companyId: companyB.id }, a), (err) => err.status === 403);
+  assert.throws(() => users.create({ name: 'Admin indevido', email: 'bad-admin@local.test', password: 'senha', passwordConfirmation: 'senha', profileId: adminProfile.id, companyId: companyA.id }, a), (err) => err.status === 403);
   assert.equal(users.list(a).every((u) => u.company_id === companyA.id), true);
 });
 

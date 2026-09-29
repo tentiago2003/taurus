@@ -33,6 +33,13 @@ export function fetchCurrentUser() {
   return request('/auth/me')
 }
 
+export function updateCurrentUser(data) {
+  return request('/auth/me', {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}
+
 export function logout() {
   return request('/auth/logout', { method: 'POST' })
 }

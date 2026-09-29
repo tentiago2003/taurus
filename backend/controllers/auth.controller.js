@@ -12,10 +12,15 @@ async function me(req, res) {
   sendJson(res, 200, { user: service.getUserFromRequest(req) });
 }
 
+async function updateMe(req, res) {
+  const body = await readJsonBody(req);
+  sendJson(res, 200, { user: service.updateCurrentUser(req, body) });
+}
+
 async function logout(req, res) {
   service.logout(req);
   service.clearSessionCookie(res, req);
   sendJson(res, 200, { ok: true });
 }
 
-module.exports = { login, me, logout };
+module.exports = { login, me, updateMe, logout };

@@ -49,6 +49,7 @@ test('cria usuário Admin sem empresa', () => {
     name: 'Admin User',
     email: 'admin.sem.empresa@taurus.local',
     password: 'senha123',
+    passwordConfirmation: 'senha123',
     profileId: adminId,
   });
   assert.equal(user.company_id, null);
@@ -63,6 +64,7 @@ test('criação de Gerente sem empresa retorna 400', () => {
         name: 'Gerente Sem Empresa',
         email: 'gerente.sem.empresa@taurus.local',
         password: 'senha123',
+    passwordConfirmation: 'senha123',
         profileId: gerenteId,
       }),
     (err) => err instanceof ApiError && err.status === 400
@@ -77,6 +79,7 @@ test('criação de Consulta sem empresa retorna 400', () => {
         name: 'Consulta Sem Empresa',
         email: 'consulta.sem.empresa@taurus.local',
         password: 'senha123',
+    passwordConfirmation: 'senha123',
         profileId: consultaId,
       }),
     (err) => err instanceof ApiError && err.status === 400
@@ -90,6 +93,7 @@ test('cria usuário com empresa', () => {
     name: 'Gerente Com Empresa',
     email: 'gerente.com.empresa@taurus.local',
     password: 'senha123',
+    passwordConfirmation: 'senha123',
     profileId: gerenteId,
     companyId: company.id,
   });
@@ -102,6 +106,7 @@ test('e-mail duplicado retorna 409', () => {
     name: 'Duplicado 1',
     email: 'duplicado@taurus.local',
     password: 'senha123',
+    passwordConfirmation: 'senha123',
     profileId: adminId,
   });
   assert.throws(
@@ -110,6 +115,7 @@ test('e-mail duplicado retorna 409', () => {
         name: 'Duplicado 2',
         email: 'duplicado@taurus.local',
         password: 'outraSenha',
+    passwordConfirmation: 'outraSenha',
         profileId: adminId,
       }),
     (err) => err instanceof ApiError && err.status === 409
@@ -122,6 +128,7 @@ test('usuário criado possui password_hash no banco', () => {
     name: 'Com Hash',
     email: 'com.hash@taurus.local',
     password: 'senha123',
+    passwordConfirmation: 'senha123',
     profileId: adminId,
   });
   const stored = repository.users.findById(user.id);
@@ -135,6 +142,7 @@ test('resposta da API nunca contém password_hash', () => {
     name: 'Sem Hash Na Resposta',
     email: 'sem.hash@taurus.local',
     password: 'senha123',
+    passwordConfirmation: 'senha123',
     profileId: adminId,
   });
   assert.equal('password_hash' in user, false);
@@ -155,6 +163,7 @@ test('atualização de dados do usuário', () => {
     name: 'Nome Original',
     email: 'original@taurus.local',
     password: 'senha123',
+    passwordConfirmation: 'senha123',
     profileId: gerenteId,
     companyId: company.id,
   });
@@ -176,6 +185,7 @@ test('alteração de senha gera novo hash', () => {
     name: 'Troca Senha',
     email: 'troca.senha@taurus.local',
     password: 'senhaAntiga',
+    passwordConfirmation: 'senhaAntiga',
     profileId: adminId,
   });
   const hashBefore = repository.users.findById(user.id).password_hash;
@@ -186,6 +196,7 @@ test('alteração de senha gera novo hash', () => {
     profileId: adminId,
     companyId: null,
     password: 'senhaNova',
+    passwordConfirmation: 'senhaNova',
   });
 
   const hashAfter = repository.users.findById(user.id).password_hash;
@@ -198,6 +209,7 @@ test('desativação e reativação de usuário', () => {
     name: 'Ativa Desativa',
     email: 'ativa.desativa@taurus.local',
     password: 'senha123',
+    passwordConfirmation: 'senha123',
     profileId: adminId,
   });
 
@@ -214,6 +226,7 @@ test('persistência de usuário após reiniciar o backend (fechar e reabrir o ba
     name: 'Persistente',
     email: 'persistente@taurus.local',
     password: 'senha123',
+    passwordConfirmation: 'senha123',
     profileId: adminId,
   });
 
@@ -242,4 +255,40 @@ test('bootstrap do Admin cria somente se o usuário ainda não existir', () => {
 
   delete process.env.TAURUS_ADMIN_EMAIL;
   delete process.env.TAURUS_ADMIN_PASSWORD;
+});
+
+test('criação com confirmação de senha divergente retorna 400', () => {
+  const adminId = getProfileId('Admin');
+  assert.throws(
+    () => usersService.create({
+      name: 'Senha Divergente',
+      email: 'senha.divergente@taurus.local',
+      password: 'senha123',
+      passwordConfirmation: 'outraSenha',
+      profileId: adminId,
+    }),
+    (err) => err instanceof ApiError && err.status === 400
+  );
+});
+
+test('alteração de senha com confirmação divergente retorna 400', () => {
+  const adminId = getProfileId('Admin');
+  const user = usersService.create({
+    name: 'Senha Divergente Edit',
+    email: 'senha.divergente.edit@taurus.local',
+    password: 'senha123',
+    passwordConfirmation: 'senha123',
+    profileId: adminId,
+  });
+  assert.throws(
+    () => usersService.update(user.id, {
+      name: user.name,
+      email: user.email,
+      profileId: adminId,
+      companyId: null,
+      password: 'senhaNova',
+      passwordConfirmation: 'outraSenha',
+    }),
+    (err) => err instanceof ApiError && err.status === 400
+  );
 });
