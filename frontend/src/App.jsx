@@ -2386,7 +2386,31 @@ function ProfilePage({ currentUser, onUserUpdated }) {
   )
 }
 
-function AboutPage() {
+function AboutPage({ currentUser }) {
+  const profileName = currentUser?.profile_name || 'Consulta'
+
+  const helpByProfile = {
+    Admin: [
+      { title: 'Conexão', description: 'teste e administre a comunicação com o broker MQTT.' },
+      { title: 'Empresas', description: 'cadastre e administre as empresas do Taurus.' },
+      { title: 'Usuários', description: 'cadastre usuários e defina seu perfil e empresa.' },
+      { title: 'Parâmetros do Sistema', description: 'configure parâmetros gerais, como retenção e intervalo padrão de amostragem.' },
+    ],
+    Gerente: [
+      { title: 'Conexão', description: 'teste e administre a comunicação com o broker MQTT da sua empresa.' },
+      { title: 'Interpretação', description: 'configure como os dados das fontes da sua empresa são interpretados.' },
+      { title: 'Dashboards', description: 'crie, edite e acompanhe dashboards da sua empresa.' },
+      { title: 'Usuários', description: 'administre os usuários da sua empresa.' },
+    ],
+    Consulta: [
+      { title: 'Mensagens Brutas', description: 'consulte as mensagens recebidas das fontes da sua empresa.' },
+      { title: 'Medições', description: 'consulte as medições registradas e seus filtros disponíveis.' },
+      { title: 'Dashboards', description: 'visualize os dashboards disponíveis para a sua empresa.' },
+    ],
+  }
+
+  const helpItems = helpByProfile[profileName] || helpByProfile.Consulta
+
   return (
     <div className="page-content">
       <h2>Ajuda / Sobre</h2>
@@ -2403,10 +2427,11 @@ function AboutPage() {
 
       <section className="help-card">
         <h3>Ajuda rápida</h3>
+        <p>Orientações para o perfil <strong>{profileName}</strong>.</p>
         <ul>
-          <li><strong>Conexão:</strong> teste a comunicação com o broker MQTT.</li>
-          <li><strong>Empresas:</strong> cadastre e administre as empresas.</li>
-          <li><strong>Usuários:</strong> cadastre usuários e defina seu perfil e empresa.</li>
+          {helpItems.map((item) => (
+            <li key={item.title}><strong>{item.title}:</strong> {item.description}</li>
+          ))}
         </ul>
       </section>
     </div>
@@ -3149,7 +3174,7 @@ function App() {
           {currentPage === 'users' && <UsersPage currentUser={currentUser} />}
           {currentPage === 'profile' && <ProfilePage currentUser={currentUser} onUserUpdated={setCurrentUser} />}
           {currentPage === 'system-settings' && currentUser.profile_name === 'Admin' && <SystemSettingsPage />}
-          {currentPage === 'about' && <AboutPage />}
+          {currentPage === 'about' && <AboutPage currentUser={currentUser} />}
         </main>
       </div>
 
