@@ -34,6 +34,8 @@ import {
   fetchRawMessages,
   fetchMeasurements,
   fetchDataSources,
+  exportMeasurements,
+  exportRawMessages,
   fetchInterpretation,
   updateInterpretation,
   testInterpretation,
@@ -1819,6 +1821,17 @@ function SystemSettingsPage() {
   )
 }
 
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
 function RawMessagesPage() {
   const [messages, setMessages] = useState([])
   const [dataSources, setDataSources] = useState([])
@@ -1832,6 +1845,7 @@ function RawMessagesPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [lastRefresh, setLastRefresh] = useState(null)
+  const [isExporting, setIsExporting] = useState(false)
 
   const toStartOfDayIso = (value) => value ? new Date(`${value}T00:00:00`).toISOString() : ''
   const toEndOfDayIso = (value) => value ? new Date(`${value}T23:59:59.999`).toISOString() : ''
@@ -1893,6 +1907,24 @@ function RawMessagesPage() {
     loadMessages({ requestedPage: 1 })
   }
 
+  const handleExport = async () => {
+    setIsExporting(true)
+    setLoadError('')
+    try {
+      const blob = await exportRawMessages({
+        dataSourceId: selectedDataSource || '',
+        topic: topic.trim(),
+        from: toStartOfDayIso(fromDate),
+        to: toEndOfDayIso(toDate),
+      })
+      downloadBlob(blob, 'mensagens-brutas.xlsx')
+    } catch (err) {
+      setLoadError(err.message || 'Não foi possível exportar as mensagens brutas.')
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
   const clearFilters = () => {
     setSelectedDataSource('')
     setTopic('')
@@ -1908,9 +1940,14 @@ function RawMessagesPage() {
           <h2>Mensagens Brutas</h2>
           <p className="page-description">Visualize as mensagens preservadas exatamente como chegaram das fontes de dados.</p>
         </div>
-        <button className="btn-small" onClick={() => loadMessages()} disabled={isLoading}>
-          {isLoading ? 'Atualizando...' : 'Atualizar'}
-        </button>
+        <div className="raw-messages-header-actions">
+          <button className="btn-small" type="button" onClick={handleExport} disabled={isExporting}>
+            {isExporting ? 'Exportando...' : 'Exportar Excel'}
+          </button>
+          <button className="btn-small" onClick={() => loadMessages()} disabled={isLoading}>
+            {isLoading ? 'Atualizando...' : 'Atualizar'}
+          </button>
+        </div>
       </div>
 
       <form className="raw-messages-toolbar" onSubmit={applyFilters}>
@@ -1997,6 +2034,7 @@ function MeasurementsPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [lastRefresh, setLastRefresh] = useState(null)
+  const [isExporting, setIsExporting] = useState(false)
 
   const toStartOfDayIso = (value) => value ? new Date(`${value}T00:00:00`).toISOString() : ''
   const toEndOfDayIso = (value) => value ? new Date(`${value}T23:59:59.999`).toISOString() : ''
@@ -2052,6 +2090,24 @@ function MeasurementsPage() {
     loadMeasurements({ requestedPage: 1 })
   }
 
+  const handleExport = async () => {
+    setIsExporting(true)
+    setLoadError('')
+    try {
+      const blob = await exportMeasurements({
+        dataSourceId: selectedDataSource || '',
+        metric: metric.trim(),
+        from: toStartOfDayIso(fromDate),
+        to: toEndOfDayIso(toDate),
+      })
+      downloadBlob(blob, 'medicoes.xlsx')
+    } catch (err) {
+      setLoadError(err.message || 'Não foi possível exportar as medições.')
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
   const clearFilters = () => {
     setSelectedDataSource('')
     setMetric('')
@@ -2067,9 +2123,14 @@ function MeasurementsPage() {
           <h2>Medições</h2>
           <p className="page-description">Visualize as medições efetivamente gravadas após a interpretação e o sampling.</p>
         </div>
-        <button className="btn-small" onClick={() => loadMeasurements()} disabled={isLoading}>
-          {isLoading ? 'Atualizando...' : 'Atualizar'}
-        </button>
+        <div className="raw-messages-header-actions">
+          <button className="btn-small" type="button" onClick={handleExport} disabled={isExporting}>
+            {isExporting ? 'Exportando...' : 'Exportar Excel'}
+          </button>
+          <button className="btn-small" onClick={() => loadMeasurements()} disabled={isLoading}>
+            {isLoading ? 'Atualizando...' : 'Atualizar'}
+          </button>
+        </div>
       </div>
 
       <form className="raw-messages-toolbar" onSubmit={applyFilters}>

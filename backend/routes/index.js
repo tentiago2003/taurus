@@ -11,6 +11,7 @@ const systemSettingsRoutes = require('./systemSettings.routes');
 const rawMessagesRoutes = require('./rawMessages.routes');
 const interpretationRoutes = require('./interpretation.routes');
 const measurementsRoutes = require('./measurements.routes');
+const exportRoutes = require('./export.routes');
 
 const router = new Router();
 
@@ -27,6 +28,7 @@ for (const routes of [
   rawMessagesRoutes,
   interpretationRoutes,
   measurementsRoutes,
+  exportRoutes,
 ]) {
   routes.register(router);
 }

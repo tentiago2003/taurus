@@ -281,3 +281,31 @@ export function updateWidget(id, data) {
 export function deleteWidget(id) {
   return request(`/widgets/${id}`, { method: 'DELETE' })
 }
+
+async function downloadXlsx(path) {
+  const response = await fetch(`${API_BASE}${path}`, { credentials: 'same-origin' })
+  if (!response.ok) {
+    let payload = null
+    try { payload = await response.json() } catch { payload = null }
+    throw new Error(payload?.error || `Erro ${response.status} ao exportar os dados.`)
+  }
+  return response.blob()
+}
+
+function buildExportQuery(params) {
+  const query = new URLSearchParams()
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== null && value !== undefined && value !== '') query.set(key, value)
+  })
+  return query.toString()
+}
+
+export function exportMeasurements(params = {}) {
+  const query = buildExportQuery(params)
+  return downloadXlsx(`/exports/measurements${query ? `?${query}` : ''}`)
+}
+
+export function exportRawMessages(params = {}) {
+  const query = buildExportQuery(params)
+  return downloadXlsx(`/exports/raw-messages${query ? `?${query}` : ''}`)
+}

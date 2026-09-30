@@ -1781,3 +1781,10 @@ body {
 
 .settings-group-title { margin: 0 0 18px; color:#e0e0e0; font-size:16px; }
 .settings-data-title { margin-top:28px; margin-bottom:14px; }
+
+.raw-messages-header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}

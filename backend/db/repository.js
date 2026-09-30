@@ -931,6 +931,54 @@ const widgets = {
     return getDatabase().prepare('DELETE FROM widgets WHERE id = ?').run(id).changes > 0;
   },
 };
+
+function buildMeasurementFilters({ dataSourceId = null, metric = null, from = null, to = null, companyId = null } = {}) {
+  const conditions = [];
+  const params = [];
+  if (companyId !== null && companyId !== undefined) { conditions.push('cn.company_id = ?'); params.push(Number(companyId)); }
+  if (dataSourceId !== null && dataSourceId !== undefined && dataSourceId !== '') { conditions.push('m.data_source_id = ?'); params.push(Number(dataSourceId)); }
+  if (metric) { conditions.push('m.metric LIKE ?'); params.push(`%${String(metric).trim()}%`); }
+  if (from) { conditions.push('m.timestamp >= ?'); params.push(from); }
+  if (to) { conditions.push('m.timestamp <= ?'); params.push(to); }
+  return { clause: conditions.length ? `WHERE ${conditions.join(' AND ')}` : '', params };
+}
+
+function listAllForExportMeasurements(options = {}) {
+  const { clause, params } = buildMeasurementFilters(options);
+  return getDatabase().prepare(
+    `SELECT m.timestamp, ds.name AS data_source_name, m.metric, m.value, m.payload
+     FROM measurements m
+     JOIN data_sources ds ON ds.id = m.data_source_id
+     JOIN connections cn ON cn.id = ds.connection_id
+     ${clause}
+     ORDER BY m.timestamp DESC, m.id DESC`
+  ).all(...params).map((row) => parseJson(row));
+}
+
+function buildRawMessageFilters({ dataSourceId = null, topic = null, from = null, to = null, companyId = null } = {}) {
+  const conditions = [];
+  const params = [];
+  if (companyId !== null && companyId !== undefined) { conditions.push('cn.company_id = ?'); params.push(Number(companyId)); }
+  if (dataSourceId !== null && dataSourceId !== undefined && dataSourceId !== '') { conditions.push('rm.data_source_id = ?'); params.push(Number(dataSourceId)); }
+  if (topic) { conditions.push('rm.topic LIKE ?'); params.push(`%${String(topic).trim()}%`); }
+  if (from) { conditions.push('rm.received_at >= ?'); params.push(from); }
+  if (to) { conditions.push('rm.received_at <= ?'); params.push(to); }
+  return { clause: conditions.length ? `WHERE ${conditions.join(' AND ')}` : '', params };
+}
+
+function listAllForExportRawMessages(options = {}) {
+  const { clause, params } = buildRawMessageFilters(options);
+  return getDatabase().prepare(
+    `SELECT rm.received_at, cn.name AS connection_name, ds.name AS data_source_name,
+            rm.topic, rm.payload
+     FROM raw_messages rm
+     JOIN data_sources ds ON ds.id = rm.data_source_id
+     JOIN connections cn ON cn.id = ds.connection_id
+     ${clause}
+     ORDER BY rm.received_at DESC, rm.id DESC`
+  ).all(...params);
+}
+
 module.exports = {
   companies,
   profiles,
@@ -940,6 +988,8 @@ module.exports = {
   connectionEvents,
   rawMessages,
   measurements,
+  listAllForExportMeasurements,
+  listAllForExportRawMessages,
   dataSources,
   connections,
   dashboards,
