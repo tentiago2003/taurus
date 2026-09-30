@@ -92,3 +92,26 @@ test('dashboard de demonstração define tamanhos predefinidos nos widgets', () 
   assert.match(source, /size: '1x1'/);
   assert.match(source, /size: '2x2'/);
 });
+
+
+test('atualiza nome e descrição de um dashboard existente', () => {
+  const db = getDatabase();
+  const company = db.prepare('INSERT INTO companies (name) VALUES (?)').run('Empresa Demo Edição');
+  const companyId = Number(company.lastInsertRowid);
+  const dashboard = db.prepare(
+    `INSERT INTO dashboards (company_id, name, description, is_default) VALUES (?, ?, ?, ?)`
+  ).run(companyId, 'Dashboard Original', 'Descrição original', 1);
+
+  const service = require('../services/dashboards.service');
+  const updated = service.update(
+    Number(dashboard.lastInsertRowid),
+    { name: 'Dashboard Atualizado', description: 'Nova descrição', isDefault: true },
+    null,
+    { profile_name: 'Admin' }
+  );
+
+  assert.equal(updated.name, 'Dashboard Atualizado');
+  assert.equal(updated.description, 'Nova descrição');
+  assert.equal(updated.is_default, 1);
+  assert.equal(updated.company_id, companyId);
+});

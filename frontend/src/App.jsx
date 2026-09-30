@@ -2530,6 +2530,7 @@ function DashboardPage({ currentUser }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [showDashboardForm, setShowDashboardForm] = useState(false)
+  const [editingDashboard, setEditingDashboard] = useState(null)
   const [showWidgetForm, setShowWidgetForm] = useState(false)
   const [editingWidget, setEditingWidget] = useState(null)
   const [dashboardForm, setDashboardForm] = useState({ name: '', description: '', companyId: '', isDefault: false })
@@ -2624,22 +2625,62 @@ function DashboardPage({ currentUser }) {
     setShowWidgetForm(true)
   }
 
+  const closeDashboardForm = () => {
+    setShowDashboardForm(false)
+    setEditingDashboard(null)
+    setDashboardForm({ name: '', description: '', companyId: '', isDefault: false })
+  }
+
+  const openNewDashboard = () => {
+    setEditingDashboard(null)
+    setDashboardForm({
+      name: '',
+      description: '',
+      companyId: isAdmin ? String(companies[0]?.id || '') : String(currentUser?.company_id || ''),
+      isDefault: dashboards.length === 0,
+    })
+    setShowDashboardForm(true)
+  }
+
+  const openEditDashboard = () => {
+    if (!dashboard) return
+    setEditingDashboard(dashboard)
+    setDashboardForm({
+      name: dashboard.name || '',
+      description: dashboard.description || '',
+      companyId: String(dashboard.company_id || ''),
+      isDefault: Boolean(dashboard.is_default),
+    })
+    setShowDashboardForm(true)
+  }
+
   const handleDashboardSubmit = async (event) => {
     event.preventDefault()
-    if (!dashboardForm.name.trim() || !dashboardForm.companyId) return
+    if (!dashboardForm.name.trim()) return
+    if (!editingDashboard && !dashboardForm.companyId) return
     setBusy(true); setError('')
     try {
-      const created = await createDashboard({
-        companyId: Number(dashboardForm.companyId),
-        name: dashboardForm.name.trim(),
-        description: dashboardForm.description.trim() || null,
-        isDefault: dashboardForm.isDefault,
-      })
-      setShowDashboardForm(false)
-      setDashboardForm({ name: '', description: '', companyId: '', isDefault: false })
-      await loadDashboards(created.id)
+      if (editingDashboard) {
+        await updateDashboard(editingDashboard.id, {
+          name: dashboardForm.name.trim(),
+          description: dashboardForm.description.trim() || null,
+          isDefault: dashboardForm.isDefault,
+        })
+        closeDashboardForm()
+        await loadDashboards(editingDashboard.id)
+        await loadDashboard(editingDashboard.id)
+      } else {
+        const created = await createDashboard({
+          companyId: Number(dashboardForm.companyId),
+          name: dashboardForm.name.trim(),
+          description: dashboardForm.description.trim() || null,
+          isDefault: dashboardForm.isDefault,
+        })
+        closeDashboardForm()
+        await loadDashboards(created.id)
+      }
     } catch (err) {
-      setError(err.message || 'Não foi possível criar o dashboard.')
+      setError(err.message || (editingDashboard ? 'Não foi possível atualizar o dashboard.' : 'Não foi possível criar o dashboard.'))
     } finally { setBusy(false) }
   }
 
@@ -2710,10 +2751,7 @@ function DashboardPage({ currentUser }) {
           <h2>Dashboards</h2>
           <p className="page-description">Painéis de visualização construídos sobre as Measurements.</p>
         </div>
-        {canManage && <button className="btn-test" onClick={() => {
-          setDashboardForm({ name: '', description: '', companyId: isAdmin ? String(companies[0]?.id || '') : String(currentUser?.company_id || ''), isDefault: dashboards.length === 0 })
-          setShowDashboardForm(true)
-        }}>+ Novo Dashboard</button>}
+        {canManage && <button className="btn-test" onClick={openNewDashboard}>+ Novo Dashboard</button>}
       </div>
 
       {error && <div className="test-status error"><p>{error}</p></div>}
@@ -2739,6 +2777,7 @@ function DashboardPage({ currentUser }) {
                   <p>{dashboard.description || 'Sem descrição.'} · {dashboard.company_name}</p>
                 </div>
                 {canManage && <div className="dashboard-toolbar">
+                  <button className="btn-small" onClick={openEditDashboard} disabled={busy}>Editar Dashboard</button>
                   <button className="btn-small" onClick={openNewWidget}>+ Adicionar Widget</button>
                   <button className="btn-small danger" onClick={handleDashboardDelete} disabled={busy}>Excluir Dashboard</button>
                 </div>}
@@ -2756,14 +2795,14 @@ function DashboardPage({ currentUser }) {
       )}
 
       {showDashboardForm && (
-        <div className="dashboard-modal-backdrop" onClick={() => setShowDashboardForm(false)}>
+        <div className="dashboard-modal-backdrop" onClick={closeDashboardForm}>
           <form className="dashboard-modal" onSubmit={handleDashboardSubmit} onClick={(event) => event.stopPropagation()}>
-            <h3>Novo Dashboard</h3>
-            <div className="form-group"><label>Nome</label><input value={dashboardForm.name} onChange={(e) => setDashboardForm({ ...dashboardForm, name: e.target.value })} placeholder="Ex.: Produção" autoFocus /></div>
-            <div className="form-group"><label>Empresa</label>{isAdmin ? (<select value={dashboardForm.companyId} onChange={(e) => setDashboardForm({ ...dashboardForm, companyId: e.target.value })}><option value="">Selecione</option>{companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}</select>) : (<input value={currentUser?.company_name || 'Empresa atual'} disabled />)}</div>
-            <div className="form-group"><label>Descrição</label><input value={dashboardForm.description} onChange={(e) => setDashboardForm({ ...dashboardForm, description: e.target.value })} /></div>
-            <label className="dashboard-check"><input type="checkbox" checked={dashboardForm.isDefault} onChange={(e) => setDashboardForm({ ...dashboardForm, isDefault: e.target.checked })} /> Dashboard padrão</label>
-            <div className="dashboard-modal-actions"><button type="button" className="btn-small" onClick={() => setShowDashboardForm(false)}>Cancelar</button><button className="btn-test" disabled={busy}>Salvar</button></div>
+            <h3>{editingDashboard ? 'Editar Dashboard' : 'Novo Dashboard'}</h3>
+            <div className="form-group"><label>Nome</label><input value={dashboardForm.name} onChange={(e) => setDashboardForm({ ...dashboardForm, name: e.target.value })} placeholder="Ex.: Produção" autoFocus required /></div>
+            {!editingDashboard && <div className="form-group"><label>Empresa</label>{isAdmin ? (<select value={dashboardForm.companyId} onChange={(e) => setDashboardForm({ ...dashboardForm, companyId: e.target.value })}><option value="">Selecione</option>{companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}</select>) : (<input value={currentUser?.company_name || 'Empresa atual'} disabled />)}</div>}
+            <div className="form-group"><label>Descrição</label><input value={dashboardForm.description} onChange={(e) => setDashboardForm({ ...dashboardForm, description: e.target.value })} placeholder="Descrição do dashboard" /></div>
+            {!editingDashboard && <label className="dashboard-check"><input type="checkbox" checked={dashboardForm.isDefault} onChange={(e) => setDashboardForm({ ...dashboardForm, isDefault: e.target.checked })} /> Dashboard padrão</label>}
+            <div className="dashboard-modal-actions"><button type="button" className="btn-small" onClick={closeDashboardForm}>Cancelar</button><button className="btn-test" disabled={busy}>{editingDashboard ? 'Salvar alterações' : 'Salvar'}</button></div>
           </form>
         </div>
       )}
