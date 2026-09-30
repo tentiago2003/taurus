@@ -31,7 +31,7 @@ const original = settingsService.get();
 
 
 test('parâmetros do sistema são inicializados com os valores padrão', () => {
-  assert.equal(original.measurement_retention_days, 7);
+  assert.equal(original.measurement_retention_days, 30);
   assert.equal(original.default_sampling_interval_seconds, 600);
 });
 
@@ -55,7 +55,7 @@ test('rejeita retenção inválida', () => {
 
 test('rejeita intervalo padrão inválido', () => {
   assert.throws(
-    () => settingsService.update({ measurementRetentionDays: 7, defaultSamplingIntervalSeconds: -1 }),
+    () => settingsService.update({ measurementRetentionDays: 30, defaultSamplingIntervalSeconds: -1 }),
     (err) => err instanceof ApiError && err.status === 400
   );
 });

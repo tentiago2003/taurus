@@ -34,6 +34,7 @@ function initDatabase() {
   migrateSystemSettings(db);
   migrateRawMessages(db);
   migrateMeasurements(db);
+  migrateCleanupHistory(db);
   seedSystemSettings(db);
 
   return db;
@@ -113,10 +114,48 @@ function seedProfiles(database) {
   }
 }
 
+
+function migrateCleanupHistory(database) {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS cleanup_history (
+      id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+      executed_at            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      executed_by            INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      cleanup_type           TEXT NOT NULL CHECK (cleanup_type IN ('automatic', 'manual')),
+      retention_days         INTEGER NOT NULL CHECK (retention_days > 0),
+      period_start           TEXT,
+      period_end             TEXT,
+      cutoff_at              TEXT,
+      measurements_deleted   INTEGER NOT NULL DEFAULT 0 CHECK (measurements_deleted >= 0),
+      raw_messages_deleted   INTEGER NOT NULL DEFAULT 0 CHECK (raw_messages_deleted >= 0)
+    );
+    CREATE INDEX IF NOT EXISTS idx_cleanup_history_executed_at
+      ON cleanup_history(executed_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_cleanup_history_type_executed_at
+      ON cleanup_history(cleanup_type, executed_at DESC);
+  `);
+
+  const columns = database.prepare('PRAGMA table_info(cleanup_history)').all();
+  const hasExecutedBy = columns.some((column) => column.name === 'executed_by');
+  if (!hasExecutedBy) {
+    database.exec(
+      'ALTER TABLE cleanup_history ADD COLUMN executed_by INTEGER REFERENCES users(id) ON DELETE SET NULL'
+    );
+  }
+}
+
 function seedSystemSettings(database) {
   database
     .prepare(
-      'INSERT OR IGNORE INTO system_settings (id, measurement_retention_days, default_sampling_interval_seconds) VALUES (1, 7, 600)'
+      'INSERT OR IGNORE INTO system_settings (id, measurement_retention_days, default_sampling_interval_seconds) VALUES (1, 30, 600)'
+    )
+    .run();
+
+  database
+    .prepare(
+      `UPDATE system_settings
+       SET measurement_retention_days = 30
+       WHERE id = 1 AND measurement_retention_days = 7`
     )
     .run();
 }

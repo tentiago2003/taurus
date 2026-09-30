@@ -7,6 +7,7 @@ const connectionManager = require('./services/connection-manager.service');
 const { initDatabase } = require('./db');
 const { handleApiRequest } = require('./http/api');
 const usersService = require('./services/users.service');
+const cleanupScheduler = require('./services/cleanup-scheduler.service');
 
 initDatabase();
 usersService.bootstrapAdmin();
@@ -250,10 +251,12 @@ server.listen(port, () => {
   console.log(`Taurus HTTP server running on port ${port}`);
   const activeCount = connectionManager.startActiveConnections();
   console.log(`Restored ${activeCount} active MQTT connection(s).`);
+  cleanupScheduler.start();
 });
 
 function shutdown(signal) {
   console.log(`Received ${signal}. Stopping MQTT connections...`);
+  cleanupScheduler.stop();
   connectionManager.stopAll({ log: true });
   server.close(() => process.exit(0));
 }

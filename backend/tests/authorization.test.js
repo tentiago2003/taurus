@@ -24,6 +24,9 @@ test('Gerente pode administrar usuários, dashboards, conexões e fontes, mas n�
   assert.equal(canAccess(manager, 'DELETE', '/api/companies/1'), false);
   assert.equal(canAccess(manager, 'GET', '/api/companies'), false);
   assert.equal(canAccess(manager, 'GET', '/api/profiles'), true);
+  assert.equal(canAccess(manager, 'GET', '/api/system-settings'), false);
+  assert.equal(canAccess(manager, 'GET', '/api/system-settings/cleanup/history'), false);
+  assert.equal(canAccess(manager, 'POST', '/api/system-settings/cleanup/manual'), false);
 });
 
 test('Consulta tem somente leitura dos dados operacionais', () => {
@@ -39,4 +42,6 @@ test('Consulta tem somente leitura dos dados operacionais', () => {
   assert.equal(canAccess(viewer, 'POST', '/api/dashboards'), false);
   assert.equal(canAccess(viewer, 'PUT', '/api/connections/1'), false);
   assert.equal(canAccess(viewer, 'DELETE', '/api/widgets/1'), false);
+  assert.equal(canAccess(viewer, 'GET', '/api/system-settings'), false);
+  assert.equal(canAccess(viewer, 'GET', '/api/system-settings/cleanup/status'), false);
 });

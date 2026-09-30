@@ -378,6 +378,136 @@ const measurements = {
   },
 };
 
+
+const cleanupHistory = {
+  list({ limit = 50 } = {}) {
+    const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 200);
+    return getDatabase()
+      .prepare(
+        `SELECT ch.id, ch.executed_at, ch.executed_by, u.name AS executed_by_name, ch.cleanup_type, ch.retention_days,
+                ch.period_start, period_end, cutoff_at,
+                measurements_deleted, raw_messages_deleted
+         FROM cleanup_history ch
+         LEFT JOIN users u ON u.id = ch.executed_by
+         ORDER BY ch.executed_at DESC, ch.id DESC
+         LIMIT ?`
+      )
+      .all(safeLimit);
+  },
+
+  latestAutomatic() {
+    return getDatabase()
+      .prepare(
+        `SELECT ch.id, ch.executed_at, ch.executed_by, u.name AS executed_by_name, ch.cleanup_type, ch.retention_days,
+                ch.period_start, period_end, cutoff_at,
+                measurements_deleted, raw_messages_deleted
+         FROM cleanup_history ch
+         LEFT JOIN users u ON u.id = ch.executed_by
+         WHERE ch.cleanup_type = 'automatic'
+         ORDER BY ch.executed_at DESC, ch.id DESC
+         LIMIT 1`
+      )
+      .get() ?? null;
+  },
+
+  countBefore(cutoffAt) {
+    const db = getDatabase();
+    const measurements = db
+      .prepare('SELECT COUNT(*) AS count FROM measurements WHERE timestamp < ?')
+      .get(cutoffAt);
+    const rawMessages = db
+      .prepare('SELECT COUNT(*) AS count FROM raw_messages WHERE received_at < ?')
+      .get(cutoffAt);
+    return {
+      measurements: Number(measurements.count),
+      rawMessages: Number(rawMessages.count),
+    };
+  },
+
+  countRange(startAt, endAt) {
+    const db = getDatabase();
+    const measurements = db
+      .prepare('SELECT COUNT(*) AS count FROM measurements WHERE timestamp >= ? AND timestamp < ?')
+      .get(startAt, endAt);
+    const rawMessages = db
+      .prepare('SELECT COUNT(*) AS count FROM raw_messages WHERE received_at >= ? AND received_at < ?')
+      .get(startAt, endAt);
+    return {
+      measurements: Number(measurements.count),
+      rawMessages: Number(rawMessages.count),
+    };
+  },
+
+  executeAutomatic({ cutoffAt, retentionDays, executedAt = null }) {
+    const db = getDatabase();
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const measurementsDeleted = db
+        .prepare('DELETE FROM measurements WHERE timestamp < ?')
+        .run(cutoffAt).changes;
+      const rawMessagesDeleted = db
+        .prepare('DELETE FROM raw_messages WHERE received_at < ?')
+        .run(cutoffAt).changes;
+
+      const result = db
+        .prepare(
+          `INSERT INTO cleanup_history
+             (executed_at, executed_by, cleanup_type, retention_days, cutoff_at,
+              measurements_deleted, raw_messages_deleted)
+           VALUES (COALESCE(?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                   NULL, 'automatic', ?, ?, ?, ?)`
+        )
+        .run(executedAt, retentionDays, cutoffAt, measurementsDeleted, rawMessagesDeleted);
+
+      db.exec('COMMIT');
+      return this.findById(result.lastInsertRowid);
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch {}
+      throw error;
+    }
+  },
+
+  executeManual({ startAt, endAt, periodStart = startAt, periodEnd = endAt, retentionDays, executedAt = null, executedBy = null }) {
+    const db = getDatabase();
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const measurementsDeleted = db
+        .prepare('DELETE FROM measurements WHERE timestamp >= ? AND timestamp < ?')
+        .run(startAt, endAt).changes;
+      const rawMessagesDeleted = db
+        .prepare('DELETE FROM raw_messages WHERE received_at >= ? AND received_at < ?')
+        .run(startAt, endAt).changes;
+
+      const result = db
+        .prepare(
+          `INSERT INTO cleanup_history
+             (executed_at, executed_by, cleanup_type, retention_days, period_start, period_end,
+              measurements_deleted, raw_messages_deleted)
+           VALUES (COALESCE(?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                   ?, 'manual', ?, ?, ?, ?, ?)`
+        )
+        .run(executedAt, executedBy, retentionDays, periodStart, periodEnd, measurementsDeleted, rawMessagesDeleted);
+
+      db.exec('COMMIT');
+      return this.findById(result.lastInsertRowid);
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch {}
+      throw error;
+    }
+  },
+
+  findById(id) {
+    return getDatabase()
+      .prepare(
+        `SELECT ch.id, ch.executed_at, ch.executed_by, u.name AS executed_by_name, ch.cleanup_type, ch.retention_days,
+                ch.period_start, period_end, cutoff_at,
+                measurements_deleted, raw_messages_deleted
+         FROM cleanup_history ch LEFT JOIN users u ON u.id = ch.executed_by WHERE ch.id = ?`
+      )
+      .get(id);
+  },
+};
+
 const dataSources = {
   list() {
     return getDatabase()
@@ -806,6 +936,7 @@ module.exports = {
   profiles,
   users,
   systemSettings,
+  cleanupHistory,
   connectionEvents,
   rawMessages,
   measurements,

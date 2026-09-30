@@ -27,6 +27,10 @@ import {
   updateCurrentUser,
   fetchSystemSettings,
   updateSystemSettings,
+  fetchCleanupStatus,
+  fetchCleanupHistory,
+  previewManualCleanup,
+  executeManualCleanup,
   fetchRawMessages,
   fetchMeasurements,
   fetchDataSources,
@@ -1476,14 +1480,41 @@ function MqttTestModal({ session, onClose }) {
   )
 }
 
+function formatCleanupDate(value) {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString('pt-BR')
+}
+
+function formatCleanupType(type) {
+  return type === 'automatic' ? 'Automática' : 'Manual'
+}
+
 function SystemSettingsPage() {
   const [settings, setSettings] = useState(null)
   const [retentionDays, setRetentionDays] = useState('')
   const [samplingMinutes, setSamplingMinutes] = useState('')
+  const [cleanupStatus, setCleanupStatus] = useState(null)
+  const [cleanupHistory, setCleanupHistory] = useState([])
+  const [manualStartDate, setManualStartDate] = useState('')
+  const [manualEndDate, setManualEndDate] = useState('')
+  const [manualPreview, setManualPreview] = useState(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isPreviewingCleanup, setIsPreviewingCleanup] = useState(false)
+  const [isExecutingCleanup, setIsExecutingCleanup] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+
+  const loadCleanup = async () => {
+    const [status, history] = await Promise.all([
+      fetchCleanupStatus(),
+      fetchCleanupHistory({ limit: 50 }),
+    ])
+    setCleanupStatus(status)
+    setCleanupHistory(history)
+  }
 
   const loadSettings = async () => {
     setIsLoading(true)
@@ -1493,6 +1524,7 @@ function SystemSettingsPage() {
       setSettings(data)
       setRetentionDays(String(data.measurement_retention_days))
       setSamplingMinutes(String(Math.round(data.default_sampling_interval_seconds / 60)))
+      await loadCleanup()
     } catch (err) {
       setError(err.message || 'Não foi possível carregar os parâmetros do sistema.')
     } finally {
@@ -1529,6 +1561,7 @@ function SystemSettingsPage() {
       setSettings(updated)
       setRetentionDays(String(updated.measurement_retention_days))
       setSamplingMinutes(String(Math.round(updated.default_sampling_interval_seconds / 60)))
+      await loadCleanup()
       setSuccess('Parâmetros salvos com sucesso.')
     } catch (err) {
       setError(err.message || 'Não foi possível salvar os parâmetros do sistema.')
@@ -1537,10 +1570,62 @@ function SystemSettingsPage() {
     }
   }
 
+  const handlePreviewCleanup = async () => {
+    setError('')
+    setSuccess('')
+    setManualPreview(null)
+
+    if (!manualStartDate || !manualEndDate) {
+      setError('Informe a data inicial e a data final da limpeza manual.')
+      return
+    }
+
+    setIsPreviewingCleanup(true)
+    try {
+      const preview = await previewManualCleanup({
+        startDate: manualStartDate,
+        endDate: manualEndDate,
+      })
+      setManualPreview(preview)
+    } catch (err) {
+      setError(err.message || 'Não foi possível calcular a limpeza.')
+    } finally {
+      setIsPreviewingCleanup(false)
+    }
+  }
+
+  const handleExecuteCleanup = async () => {
+    if (!manualPreview) return
+
+    const confirmed = window.confirm(
+      `Esta operação excluirá permanentemente ${manualPreview.measurements} medição(ões) e ${manualPreview.rawMessages} mensagem(ns) bruta(s) do período informado. Deseja continuar?`
+    )
+    if (!confirmed) return
+
+    setError('')
+    setSuccess('')
+    setIsExecutingCleanup(true)
+    try {
+      const result = await executeManualCleanup({
+        startDate: manualStartDate,
+        endDate: manualEndDate,
+      })
+      setManualPreview(null)
+      await loadCleanup()
+      setSuccess(
+        `Limpeza manual executada: ${result.measurements_deleted} medição(ões) e ${result.raw_messages_deleted} mensagem(ns) bruta(s) removida(s).`
+      )
+    } catch (err) {
+      setError(err.message || 'Não foi possível executar a limpeza manual.')
+    } finally {
+      setIsExecutingCleanup(false)
+    }
+  }
+
   if (isLoading) {
     return (
       <div className="page-content">
-        <h2>Parâmetros do Sistema</h2>
+        <h2>Configurações</h2>
         <div className="empty-state"><p>Carregando...</p></div>
       </div>
     )
@@ -1548,12 +1633,13 @@ function SystemSettingsPage() {
 
   return (
     <div className="page-content system-settings-page">
-      <h2>Parâmetros do Sistema</h2>
-      <p className="page-description">Configurações globais utilizadas pelo Taurus.</p>
+      <h2>Configurações</h2>
+      <p className="page-description">Configurações gerais e gestão dos dados armazenados pelo Taurus.</p>
 
       <form className="system-settings-card" onSubmit={handleSubmit}>
+        <h3 className="settings-group-title">Parâmetros</h3>
         <div className="settings-field">
-          <label htmlFor="measurement-retention">Retenção das medições</label>
+          <label htmlFor="measurement-retention">Retenção dos dados históricos</label>
           <div className="settings-input-row">
             <input
               id="measurement-retention"
@@ -1566,7 +1652,7 @@ function SystemSettingsPage() {
             />
             <span>dias</span>
           </div>
-          <small>Tempo que o histórico de medições deverá permanecer armazenado.</small>
+          <small>Período de retenção usado pela limpeza automática de medições e mensagens brutas.</small>
         </div>
 
         <div className="settings-field">
@@ -1593,6 +1679,142 @@ function SystemSettingsPage() {
           {isSubmitting ? 'Salvando...' : 'Salvar parâmetros'}
         </button>
       </form>
+
+      <h3 className="settings-group-title settings-data-title">Dados armazenados</h3>
+
+      <section className="system-settings-section">
+        <div className="settings-section-header">
+          <div>
+            <h3>Limpeza automática</h3>
+            <p>O Taurus verifica a cada hora se já passou o intervalo da última limpeza automática. Reinícios do backend não reiniciam a contagem.</p>
+          </div>
+        </div>
+
+        <div className="cleanup-status-grid">
+          <div>
+            <span>Última limpeza automática</span>
+            <strong>{formatCleanupDate(cleanupStatus?.latestAutomatic?.executed_at)}</strong>
+          </div>
+          <div>
+            <span>Próxima limpeza prevista</span>
+            <strong>{formatCleanupDate(cleanupStatus?.nextAutomaticAt)}</strong>
+          </div>
+          <div>
+            <span>Registros elegíveis agora</span>
+            <strong>
+              {(cleanupStatus?.automaticCandidates?.measurements ?? 0)} medições /{' '}
+              {(cleanupStatus?.automaticCandidates?.rawMessages ?? 0)} mensagens
+            </strong>
+          </div>
+        </div>
+      </section>
+
+      <section className="system-settings-section">
+        <div className="settings-section-header">
+          <div>
+            <h3>Limpeza manual</h3>
+            <p>Escolha um período específico. A data final é inclusiva.</p>
+          </div>
+        </div>
+
+        <div className="cleanup-date-row">
+          <div className="settings-field">
+            <label htmlFor="cleanup-start">De</label>
+            <input
+              id="cleanup-start"
+              type="date"
+              value={manualStartDate}
+              onChange={(e) => {
+                setManualStartDate(e.target.value)
+                setManualPreview(null)
+              }}
+            />
+          </div>
+          <div className="settings-field">
+            <label htmlFor="cleanup-end">Até</label>
+            <input
+              id="cleanup-end"
+              type="date"
+              value={manualEndDate}
+              onChange={(e) => {
+                setManualEndDate(e.target.value)
+                setManualPreview(null)
+              }}
+            />
+          </div>
+        </div>
+
+        <button
+          className="btn-test settings-save-button"
+          type="button"
+          onClick={handlePreviewCleanup}
+          disabled={isPreviewingCleanup || isExecutingCleanup}
+        >
+          {isPreviewingCleanup ? 'Calculando...' : 'Consultar impacto'}
+        </button>
+
+        {manualPreview && (
+          <div className="cleanup-preview">
+            <strong>Serão removidos:</strong>
+            <span>{manualPreview.measurements} medições</span>
+            <span>{manualPreview.rawMessages} mensagens brutas</span>
+            <button
+              className="btn-test settings-cleanup-danger"
+              type="button"
+              onClick={handleExecuteCleanup}
+              disabled={isExecutingCleanup}
+            >
+              {isExecutingCleanup ? 'Executando...' : 'Executar limpeza agora'}
+            </button>
+          </div>
+        )}
+      </section>
+
+      <section className="system-settings-section">
+        <div className="settings-section-header">
+          <div>
+            <h3>Histórico de limpezas</h3>
+            <p>Registro das limpezas automáticas e manuais executadas pelo Taurus.</p>
+          </div>
+        </div>
+
+        {cleanupHistory.length === 0 ? (
+          <div className="empty-state"><p>Nenhuma limpeza registrada ainda.</p></div>
+        ) : (
+          <div className="cleanup-history-container">
+            <table className="cleanup-history-table">
+              <thead>
+                <tr>
+                  <th>Data/hora</th>
+                  <th>Tipo</th>
+                  <th>Executado por</th>
+                  <th>Retenção</th>
+                  <th>Período</th>
+                  <th>Medições</th>
+                  <th>Mensagens brutas</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cleanupHistory.map((item) => (
+                  <tr key={item.id}>
+                    <td>{formatCleanupDate(item.executed_at)}</td>
+                    <td>{formatCleanupType(item.cleanup_type)}</td>
+                    <td>{item.executed_by_name || (item.cleanup_type === 'automatic' ? 'Sistema' : '—')}</td>
+                    <td>{item.retention_days} dias</td>
+                    <td>
+                      {item.cleanup_type === 'manual'
+                        ? `${item.period_start?.slice(0, 10) || '—'} → ${item.period_end?.slice(0, 10) || '—'}`
+                        : `Antes de ${item.cutoff_at?.slice(0, 10) || '—'}`}
+                    </td>
+                    <td>{item.measurements_deleted}</td>
+                    <td>{item.raw_messages_deleted}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
     </div>
   )
 }
@@ -2394,7 +2616,7 @@ function AboutPage({ currentUser }) {
       { title: 'Conexão', description: 'teste e administre a comunicação com o broker MQTT.' },
       { title: 'Empresas', description: 'cadastre e administre as empresas do Taurus.' },
       { title: 'Usuários', description: 'cadastre usuários e defina seu perfil e empresa.' },
-      { title: 'Parâmetros do Sistema', description: 'configure parâmetros gerais, como retenção e intervalo padrão de amostragem.' },
+      { title: 'Configurações', description: 'configure parâmetros gerais e administre os dados armazenados pelo Taurus.' },
     ],
     Gerente: [
       { title: 'Conexão', description: 'teste e administre a comunicação com o broker MQTT da sua empresa.' },
@@ -3152,7 +3374,7 @@ function App() {
               <button className={`nav-item ${currentPage === 'users' ? 'active' : ''}`} onClick={() => handlePageChange('users')}>Usuários</button>
             )}
             {currentUser.profile_name === 'Admin' && (
-              <button className={`nav-item ${currentPage === 'system-settings' ? 'active' : ''}`} onClick={() => handlePageChange('system-settings')}>Parâmetros do Sistema</button>
+              <button className={`nav-item ${currentPage === 'system-settings' ? 'active' : ''}`} onClick={() => handlePageChange('system-settings')}>Configurações</button>
             )}
             <button className={`nav-item ${currentPage === 'profile' ? 'active' : ''}`} onClick={() => handlePageChange('profile')}>Meu perfil</button>
             <button className={`nav-item ${currentPage === 'about' ? 'active' : ''}`} onClick={() => handlePageChange('about')}>Ajuda / Sobre</button>

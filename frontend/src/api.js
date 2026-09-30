@@ -172,6 +172,28 @@ export function updateSystemSettings(data) {
   })
 }
 
+export function fetchCleanupStatus() {
+  return request('/system-settings/cleanup/status')
+}
+
+export function fetchCleanupHistory({ limit = 50 } = {}) {
+  return request(`/system-settings/cleanup/history?limit=${encodeURIComponent(limit)}`)
+}
+
+export function previewManualCleanup(data) {
+  return request('/system-settings/cleanup/preview', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export function executeManualCleanup(data) {
+  return request('/system-settings/cleanup/manual', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
 
 
 export function fetchMeasurements({ dataSourceId = null, metric = '', from = '', to = '', page = 1, pageSize = 50 } = {}) {

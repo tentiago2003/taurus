@@ -34,6 +34,10 @@ function canAccess(user, method, pathname) {
   const profile = profileName(user);
   if (profile === PROFILE_ADMIN) return true;
 
+  if (pathname.startsWith('/api/system-settings')) {
+    return false;
+  }
+
   if (profile === PROFILE_VIEWER) {
     if (pathname.startsWith('/api/companies') || pathname.startsWith('/api/profiles') || pathname.startsWith('/api/users')) return false;
     return isReadRequest(method);

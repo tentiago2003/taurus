@@ -162,3 +162,23 @@ CREATE TABLE IF NOT EXISTS system_settings (
   updated_at                 TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_by                 INTEGER REFERENCES users(id) ON DELETE SET NULL
 );
+
+
+CREATE TABLE IF NOT EXISTS cleanup_history (
+  id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+  executed_at            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  executed_by             INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  cleanup_type           TEXT NOT NULL CHECK (cleanup_type IN ('automatic', 'manual')),
+  retention_days         INTEGER NOT NULL CHECK (retention_days > 0),
+  period_start           TEXT,
+  period_end             TEXT,
+  cutoff_at              TEXT,
+  measurements_deleted   INTEGER NOT NULL DEFAULT 0 CHECK (measurements_deleted >= 0),
+  raw_messages_deleted   INTEGER NOT NULL DEFAULT 0 CHECK (raw_messages_deleted >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_cleanup_history_executed_at
+  ON cleanup_history(executed_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_cleanup_history_type_executed_at
+  ON cleanup_history(cleanup_type, executed_at DESC);
