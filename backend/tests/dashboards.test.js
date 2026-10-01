@@ -115,3 +115,80 @@ test('atualiza nome e descrição de um dashboard existente', () => {
   assert.equal(updated.is_default, 1);
   assert.equal(updated.company_id, companyId);
 });
+
+test('gráfico usa período padrão de 10 dias e aceita 20, 30 ou tudo', () => {
+  const db = getDatabase();
+  const company = db.prepare('INSERT INTO companies (name) VALUES (?)').run('Empresa Período');
+  const companyId = Number(company.lastInsertRowid);
+  const connection = db.prepare(
+    `INSERT INTO connections (company_id, name, type, configuration) VALUES (?, ?, ?, ?)`
+  ).run(companyId, 'Conexão Período', 'mqtt', '{}');
+  const connectionId = Number(connection.lastInsertRowid);
+  const source = db.prepare(
+    `INSERT INTO data_sources (connection_id, name, type, topic) VALUES (?, ?, ?, ?)`
+  ).run(connectionId, 'LoRa Período', 'lorawan', 'period/topic');
+  const sourceId = Number(source.lastInsertRowid);
+  const dashboard = db.prepare(
+    `INSERT INTO dashboards (company_id, name, description, is_default) VALUES (?, ?, ?, ?)`
+  ).run(companyId, 'Dashboard Período', 'Teste', 0);
+  const widget = db.prepare(
+    `INSERT INTO widgets (dashboard_id, name, type, position, configuration) VALUES (?, ?, ?, ?, ?)`
+  ).run(Number(dashboard.lastInsertRowid), 'Gráfico Período', 'chart', 0, JSON.stringify({ metric: 'temperature_1', period_days: 10, unit: '°C' }));
+  db.prepare('INSERT INTO widget_data_sources (widget_id, data_source_id) VALUES (?, ?)').run(Number(widget.lastInsertRowid), sourceId);
+
+  const now = Date.now();
+  const insert = db.prepare('INSERT INTO measurements (data_source_id, metric, timestamp, value) VALUES (?, ?, ?, ?)');
+  insert.run(sourceId, 'temperature_1', new Date(now - 15 * 86400000).toISOString(), 15);
+  insert.run(sourceId, 'temperature_1', new Date(now - 5 * 86400000).toISOString(), 20);
+  insert.run(sourceId, 'temperature_1', new Date(now - 1 * 86400000).toISOString(), 21);
+
+  const service = require('../services/dashboards.service');
+  const widgetId = Number(widget.lastInsertRowid);
+  const defaultData = service.getWidgetDataById(widgetId, { profile_name: 'Admin' });
+  const twenty = service.getWidgetDataById(widgetId, { profile_name: 'Admin' }, { periodDays: 20 });
+  const all = service.getWidgetDataById(widgetId, { profile_name: 'Admin' }, { periodDays: 'all' });
+
+  assert.equal(defaultData.periodDays, 10);
+  assert.equal(defaultData.sources[0].rows.length, 2);
+  assert.equal(twenty.periodDays, 20);
+  assert.equal(twenty.sources[0].rows.length, 3);
+  assert.equal(all.periodDays, null);
+  assert.equal(all.sources[0].rows.length, 3);
+});
+
+test('tabela de widget pagina no backend sem carregar todo o histórico', () => {
+  const db = getDatabase();
+  const company = db.prepare('INSERT INTO companies (name) VALUES (?)').run('Empresa Tabela');
+  const companyId = Number(company.lastInsertRowid);
+  const connection = db.prepare(
+    `INSERT INTO connections (company_id, name, type, configuration) VALUES (?, ?, ?, ?)`
+  ).run(companyId, 'Conexão Tabela', 'mqtt', '{}');
+  const connectionId = Number(connection.lastInsertRowid);
+  const source = db.prepare(
+    `INSERT INTO data_sources (connection_id, name, type, topic) VALUES (?, ?, ?, ?)`
+  ).run(connectionId, 'LoRa Tabela', 'lorawan', 'table/topic');
+  const sourceId = Number(source.lastInsertRowid);
+  const dashboard = db.prepare(
+    `INSERT INTO dashboards (company_id, name, description, is_default) VALUES (?, ?, ?, ?)`
+  ).run(companyId, 'Dashboard Tabela', 'Teste', 0);
+  const widget = db.prepare(
+    `INSERT INTO widgets (dashboard_id, name, type, position, configuration) VALUES (?, ?, ?, ?, ?)`
+  ).run(Number(dashboard.lastInsertRowid), 'Tabela', 'table', 0, JSON.stringify({ metric: 'temperature_1', unit: '°C' }));
+  db.prepare('INSERT INTO widget_data_sources (widget_id, data_source_id) VALUES (?, ?)').run(Number(widget.lastInsertRowid), sourceId);
+
+  const insert = db.prepare('INSERT INTO measurements (data_source_id, metric, timestamp, value) VALUES (?, ?, ?, ?)');
+  for (let index = 1; index <= 25; index += 1) {
+    insert.run(sourceId, 'temperature_1', new Date(Date.now() - index * 1000).toISOString(), index);
+  }
+
+  const service = require('../services/dashboards.service');
+  const result = service.getWidgetDataById(Number(widget.lastInsertRowid), { profile_name: 'Admin' }, { page: 2, pageSize: 10 });
+
+  assert.equal(result.table.total, 25);
+  assert.equal(result.table.page, 2);
+  assert.equal(result.table.pageSize, 10);
+  assert.equal(result.table.totalPages, 3);
+  assert.equal(result.sources[0].rows.length, 10);
+  assert.equal(result.sources[0].rows[0].value, 11);
+  assert.equal(result.sources[0].rows[9].value, 20);
+});

@@ -11,12 +11,21 @@ function validateWidgetType(type) {
   }
 }
 
-function getWidgetData(widget) {
+function normalizeChartPeriodDays(value, fallback = 10) {
+  if (value === undefined || value === '') return fallback;
+  if (value === null || value === 'all') return null;
+  const days = Number(value);
+  if ([10, 20, 30].includes(days)) return days;
+  return fallback;
+}
+
+function getWidgetData(widget, options = {}) {
   const configuration = widget.configuration || {};
   const dataSourceIds = widget.dataSourceIdsOverride || repository.widgets.listDataSourceIds(widget.id);
   const metric = configuration.metric || 'value';
-  const periodHours = Number(configuration.period_hours || 24);
-  const since = new Date(Date.now() - periodHours * 60 * 60 * 1000).toISOString();
+  const configuredPeriodDays = normalizeChartPeriodDays(configuration.period_days, 10);
+  const periodDays = normalizeChartPeriodDays(options.periodDays, configuredPeriodDays);
+  const since = periodDays === null ? null : new Date(Date.now() - periodDays * 24 * 60 * 60 * 1000).toISOString();
 
   const sources = dataSourceIds
     .map((id) => repository.dataSources.findById(id))
@@ -35,25 +44,70 @@ function getWidgetData(widget) {
       };
     }
 
-    const rows = repository.measurements.listByDataSource(source.id, { limit: 1000 })
-      .filter((row) => row.metric === metric && row.timestamp >= since)
-      .sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)));
+    if (widget.type === 'chart') {
+      const rows = repository.measurements.listByDataSourcePeriod(source.id, { metric, from: since })
+        .sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)));
+      return {
+        dataSourceId: source.id,
+        dataSourceName: source.name,
+        metric,
+        rows,
+      };
+    }
 
     return {
       dataSourceId: source.id,
       dataSourceName: source.name,
       metric,
-      rows: widget.type === 'table' ? rows.slice().reverse().slice(0, 50) : rows,
     };
   });
+
+  let table = null;
+  if (widget.type === 'table') {
+    table = repository.measurements.listByDataSourcesPaged(dataSourceIds, {
+      metric,
+      page: options.page,
+      pageSize: options.pageSize,
+    });
+    sourceData[0] = { ...(sourceData[0] || {}), rows: [] };
+    const bySource = new Map(sources.map((source) => [source.id, {
+      dataSourceId: source.id,
+      dataSourceName: source.name,
+      metric,
+      rows: [],
+    }]));
+    for (const row of table.rows) {
+      const source = bySource.get(row.data_source_id);
+      if (source) source.rows.push(row);
+    }
+    return {
+      metric,
+      unit: configuration.unit || '',
+      decimalPlaces: Number(configuration.decimal_places ?? 1),
+      size: configuration.size || null,
+      periodDays,
+      table,
+      sources: [...bySource.values()],
+    };
+  }
 
   return {
     metric,
     unit: configuration.unit || '',
     decimalPlaces: Number(configuration.decimal_places ?? 1),
     size: configuration.size || null,
+    periodDays,
     sources: sourceData,
   };
+}
+
+function getWidgetDataById(id, user, options = {}) {
+  const widget = repository.widgets.findById(id);
+  if (!widget) throw new ApiError(404, 'Widget não encontrado.');
+  access.ensureCompanyAccess(user, access.companyIdFromWidget(id));
+  const dataSourceIds = repository.widgets.listDataSourceIds(id)
+    .filter((dataSourceId) => Number(access.companyIdFromDataSource(dataSourceId)) === Number(access.companyIdFromWidget(id)));
+  return { ...getWidgetData({ ...widget, dataSourceIdsOverride: dataSourceIds }, options), widgetId: widget.id };
 }
 
 function hydrateDashboard(dashboard) {
@@ -61,7 +115,7 @@ function hydrateDashboard(dashboard) {
     const dataSourceIds = repository.widgets.listDataSourceIds(widget.id)
       .filter((dataSourceId) => Number(access.companyIdFromDataSource(dataSourceId)) === Number(dashboard.company_id));
     const scopedWidget = { ...widget };
-    const data = getWidgetData({ ...scopedWidget, dataSourceIdsOverride: dataSourceIds });
+    const data = getWidgetData({ ...scopedWidget, dataSourceIdsOverride: dataSourceIds }, { page: 1, pageSize: 10 });
     return { ...scopedWidget, data_source_ids: dataSourceIds, data };
   });
   return { ...dashboard, widgets };
@@ -262,7 +316,7 @@ function ensureDemoDashboard() {
       position: 2,
       configuration: {
         metric: metrics[0].metric,
-        period_hours: 24,
+        period_days: 10,
         unit: metrics[0].metric.startsWith('temperature') ? '°C' : '',
         decimal_places: 1,
         size: '2x2',
@@ -277,6 +331,7 @@ function ensureDemoDashboard() {
 module.exports = {
   list,
   get,
+  getWidgetDataById,
   create,
   update,
   remove,

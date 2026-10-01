@@ -305,6 +305,52 @@ const measurements = {
       .all(dataSourceId, limit)
       .map((row) => parseJson(row));
   },
+  listByDataSourcePeriod(dataSourceId, { metric = null, from = null, to = null } = {}) {
+    const where = ['m.data_source_id = ?'];
+    const params = [Number(dataSourceId)];
+    if (metric) { where.push('m.metric = ?'); params.push(metric); }
+    if (from) { where.push('m.timestamp >= ?'); params.push(from); }
+    if (to) { where.push('m.timestamp <= ?'); params.push(to); }
+    return getDatabase()
+      .prepare(
+        `SELECT m.*
+         FROM measurements m
+         WHERE ${where.join(' AND ')}
+         ORDER BY m.timestamp ASC, m.id ASC`
+      )
+      .all(...params)
+      .map((row) => parseJson(row));
+  },
+  listByDataSourcesPaged(dataSourceIds, { metric = null, page = 1, pageSize = 10 } = {}) {
+    const ids = [...new Set(dataSourceIds.map(Number).filter(Number.isInteger))];
+    if (!ids.length) {
+      return { rows: [], total: 0, page: 1, pageSize: 10, totalPages: 1 };
+    }
+    const safePage = Math.max(Number(page) || 1, 1);
+    const safePageSize = Math.min(Math.max(Number(pageSize) || 10, 1), 50);
+    const placeholders = ids.map(() => '?').join(',');
+    const where = [`m.data_source_id IN (${placeholders})`];
+    const params = [...ids];
+    if (metric) { where.push('m.metric = ?'); params.push(metric); }
+    const clause = `WHERE ${where.join(' AND ')}`;
+    const db = getDatabase();
+    const count = db.prepare(`SELECT COUNT(*) AS count FROM measurements m ${clause}`).get(...params);
+    const rows = db.prepare(
+      `SELECT m.*, ds.name AS data_source_name
+       FROM measurements m
+       JOIN data_sources ds ON ds.id = m.data_source_id
+       ${clause}
+       ORDER BY m.timestamp DESC, m.id DESC
+       LIMIT ? OFFSET ?`
+    ).all(...params, safePageSize, (safePage - 1) * safePageSize).map((row) => parseJson(row));
+    return {
+      rows,
+      total: Number(count.count),
+      page: safePage,
+      pageSize: safePageSize,
+      totalPages: Math.max(Math.ceil(Number(count.count) / safePageSize), 1),
+    };
+  },
   listPagedByCompany(companyId, { metric = null, from = null, to = null, page = 1, pageSize = 50 } = {}) {
     const safePage = Math.max(Number(page) || 1, 1);
     const safePageSize = Math.min(Math.max(Number(pageSize) || 50, 1), 200);

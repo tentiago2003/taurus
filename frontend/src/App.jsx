@@ -41,6 +41,7 @@ import {
   testInterpretation,
   fetchDashboards,
   fetchDashboard,
+  fetchWidgetData,
   createDashboard,
   updateDashboard,
   deleteDashboard,
@@ -2736,8 +2737,10 @@ const getDefaultWidgetSize = (type) => {
   return '1x1'
 }
 
-function DashboardWidget({ widget, onEdit, onDelete }) {
+function DashboardWidget({ widget, onEdit, onDelete, onChartPeriodChange, onTablePageChange }) {
   const data = widget.data || {}
+  const chartRef = useRef(null)
+  const [hoveredChart, setHoveredChart] = useState(null)
   const decimals = Number.isInteger(data.decimalPlaces) ? data.decimalPlaces : 1
   const formatValue = (value) => {
     if (value === null || value === undefined || Number.isNaN(Number(value))) return '—'
@@ -2757,6 +2760,15 @@ function DashboardWidget({ widget, onEdit, onDelete }) {
     const y = height - ((Number(row.value) - min) / range) * (height - 20) - 10
     return `${x},${y}`
   }).join(' ')
+  const chartPeriod = data.periodDays ?? widget.configuration?.period_days ?? 10
+  const table = data.table || { page: 1, pageSize: 10, total: 0, totalPages: 1 }
+  const handleTablePageClick = (event, nextPage) => {
+    event.preventDefault()
+    event.stopPropagation()
+    if (typeof onTablePageChange === 'function') {
+      onTablePageChange(widget, nextPage, table.pageSize)
+    }
+  }
 
   return (
     <section className={`dashboard-widget widget-${widget.type} widget-size-${data.size || getDefaultWidgetSize(widget.type)}`}>
@@ -2785,44 +2797,89 @@ function DashboardWidget({ widget, onEdit, onDelete }) {
 
       {widget.type === 'chart' && (
         <div className="dashboard-chart-body">
+          <div className="dashboard-widget-filter">
+            <label>Período</label>
+            <select value={chartPeriod === null ? 'all' : String(chartPeriod)} onChange={(event) => onChartPeriodChange?.(widget, event.target.value === 'all' ? null : Number(event.target.value))}>
+              <option value="10">10 dias</option>
+              <option value="20">20 dias</option>
+              <option value="30">30 dias</option>
+              <option value="all">Tudo</option>
+            </select>
+          </div>
           {chartRows.length ? (
             <>
-              <svg className="dashboard-chart" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label={`Gráfico de ${widget.name}`}>
-                <polyline points={points} fill="none" stroke="currentColor" strokeWidth="3" vectorEffect="non-scaling-stroke" />
-                {chartRows.map((row, index) => {
-                  if (index !== 0 && index !== chartRows.length - 1 && index % Math.max(1, Math.floor(chartRows.length / 5)) !== 0) return null
-                  const x = chartRows.length === 1 ? width / 2 : (index / (chartRows.length - 1)) * width
-                  const y = height - ((Number(row.value) - min) / range) * (height - 20) - 10
-                  return <circle key={`${row.id}-${index}`} cx={x} cy={y} r="4" fill="currentColor" />
-                })}
-              </svg>
+              <div className="dashboard-chart-canvas">
+                <svg
+                  ref={chartRef}
+                  className="dashboard-chart"
+                  viewBox={`0 0 ${width} ${height}`}
+                  preserveAspectRatio="none"
+                  role="img"
+                  aria-label={`Gráfico de ${widget.name}`}
+                  onMouseMove={(event) => {
+                    if (chartRows.length < 1 || !chartRef.current) return
+                    const rect = chartRef.current.getBoundingClientRect()
+                    const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width))
+                    const index = chartRows.length === 1 ? 0 : Math.round(ratio * (chartRows.length - 1))
+                    setHoveredChart({ row: chartRows[index], x: ratio * 100 })
+                  }}
+                  onMouseLeave={() => setHoveredChart(null)}
+                >
+                  <polyline points={points} fill="none" stroke="currentColor" strokeWidth="3" vectorEffect="non-scaling-stroke" />
+                  {chartRows.map((row, index) => {
+                    if (index !== 0 && index !== chartRows.length - 1 && index % Math.max(1, Math.floor(chartRows.length / 5)) !== 0) return null
+                    const x = chartRows.length === 1 ? width / 2 : (index / (chartRows.length - 1)) * width
+                    const y = height - ((Number(row.value) - min) / range) * (height - 20) - 10
+                    return <circle key={`${row.id}-${index}`} cx={x} cy={y} r="4" fill="currentColor" />
+                  })}
+                  {hoveredChart?.row && (() => {
+                    const index = chartRows.findIndex((row) => row.id === hoveredChart.row.id)
+                    const x = chartRows.length === 1 ? width / 2 : (index / (chartRows.length - 1)) * width
+                    const y = height - ((Number(hoveredChart.row.value) - min) / range) * (height - 20) - 10
+                    return <circle cx={x} cy={y} r="6" fill="currentColor" />
+                  })()}
+                </svg>
+                {hoveredChart?.row && (
+                  <div className="dashboard-chart-tooltip" style={{ left: `${Math.min(82, Math.max(4, hoveredChart.x))}%` }}>
+                    <strong>{new Date(hoveredChart.row.timestamp).toLocaleString('pt-BR')}</strong>
+                    <span>{data.metric || 'value'}: {formatValue(hoveredChart.row.value)}{unit ? ` ${unit}` : ''}</span>
+                  </div>
+                )}
+              </div>
               <div className="dashboard-chart-meta">
                 <span>mín. {formatValue(min)} {unit}</span>
                 <span>máx. {formatValue(max)} {unit}</span>
                 <span>{chartRows.length} pontos</span>
               </div>
             </>
-          ) : <div className="empty-state"><p>Sem medições no período configurado.</p></div>}
+          ) : <div className="empty-state"><p>Sem medições no período selecionado.</p></div>}
         </div>
       )}
 
       {widget.type === 'table' && (
-        <div className="dashboard-table-wrap">
-          <table className="slaves-table dashboard-data-table">
-            <thead><tr><th>Data/Hora</th><th>Data Source</th><th>Valor</th></tr></thead>
-            <tbody>
-              {(data.sources || []).flatMap((source) =>
-                (source.rows || []).map((row) => (
-                  <tr key={`${source.dataSourceId}-${row.id}`}>
-                    <td>{new Date(row.timestamp).toLocaleString('pt-BR')}</td>
-                    <td>{source.dataSourceName}</td>
-                    <td>{formatValue(row.value)} {unit}</td>
-                  </tr>
-                ))
-              ).slice(0, 50)}
-              {!data.sources?.some((source) => source.rows?.length) && <tr><td colSpan="3">Sem medições.</td></tr>}
-            </tbody>
-          </table>
+        <div className="dashboard-table-body">
+          <div className="dashboard-table-wrap">
+            <table className="slaves-table dashboard-data-table">
+              <thead><tr><th>Data/Hora</th><th>Data Source</th><th>Valor</th></tr></thead>
+              <tbody>
+                {(data.sources || []).flatMap((source) =>
+                  (source.rows || []).map((row) => (
+                    <tr key={`${source.dataSourceId}-${row.id}`}>
+                      <td>{new Date(row.timestamp).toLocaleString('pt-BR')}</td>
+                      <td>{source.dataSourceName}</td>
+                      <td>{formatValue(row.value)} {unit}</td>
+                    </tr>
+                  ))
+                )}
+                {!data.table?.total && <tr><td colSpan="3">Sem medições.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          <div className="dashboard-table-pagination">
+            <button type="button" className="btn-small" disabled={table.page <= 1} onClick={(event) => handleTablePageClick(event, table.page - 1)} aria-label="Página anterior">Anterior</button>
+            <span>Página {table.page} de {table.totalPages} · {table.total} registros</span>
+            <button type="button" className="btn-small" disabled={table.page >= table.totalPages} onClick={(event) => handleTablePageClick(event, table.page + 1)} aria-label="Próxima página">Próxima</button>
+          </div>
         </div>
       )}
     </section>
@@ -2843,10 +2900,11 @@ function DashboardPage({ currentUser }) {
   const [editingWidget, setEditingWidget] = useState(null)
   const [dashboardForm, setDashboardForm] = useState({ name: '', description: '', companyId: '', isDefault: false })
   const [widgetForm, setWidgetForm] = useState({
-    name: '', type: 'value', dataSourceId: '', metric: 'temperature_1', unit: '°C', decimalPlaces: 1, periodHours: 24,
+    name: '', type: 'value', dataSourceId: '', metric: 'temperature_1', unit: '°C', decimalPlaces: 1, periodDays: 10,
   })
   const [busy, setBusy] = useState(false)
   const [widgetValidationError, setWidgetValidationError] = useState('')
+  const tablePagesRef = useRef({})
   const isAdmin = currentUser?.profile_name === 'Admin'
   const isManager = currentUser?.profile_name === 'Gerente'
   const canManage = isAdmin || isManager
@@ -2879,7 +2937,32 @@ function DashboardPage({ currentUser }) {
       return
     }
     try {
-      setDashboard(await fetchDashboard(id))
+      const refreshedDashboard = await fetchDashboard(id)
+      const savedTablePages = tablePagesRef.current[id] || {}
+      const tableWidgets = (refreshedDashboard.widgets || []).filter((widget) => widget.type === 'table' && savedTablePages[widget.id])
+
+      if (!tableWidgets.length) {
+        setDashboard(refreshedDashboard)
+        return
+      }
+
+      const refreshedTableData = await Promise.all(tableWidgets.map(async (widget) => {
+        const { page, pageSize } = savedTablePages[widget.id]
+        try {
+          const data = await fetchWidgetData(widget.id, { page, pageSize })
+          return [widget.id, data]
+        } catch {
+          return [widget.id, null]
+        }
+      }))
+      const tableDataByWidget = new Map(refreshedTableData.filter(([, data]) => data).map(([widgetId, data]) => [widgetId, data]))
+      setDashboard({
+        ...refreshedDashboard,
+        widgets: (refreshedDashboard.widgets || []).map((widget) => {
+          const data = tableDataByWidget.get(widget.id)
+          return data ? { ...widget, data } : widget
+        }),
+      })
     } catch (err) {
       setError(err.message || 'Não foi possível carregar o dashboard.')
     }
@@ -2895,7 +2978,7 @@ function DashboardPage({ currentUser }) {
   }, [selectedId])
 
   const resetWidgetForm = () => {
-    setWidgetForm({ name: '', type: 'value', dataSourceId: dataSources[0]?.id?.toString() || '', metric: 'temperature_1', unit: '°C', decimalPlaces: 1, periodHours: 24, size: '1x1' })
+    setWidgetForm({ name: '', type: 'value', dataSourceId: dataSources[0]?.id?.toString() || '', metric: 'temperature_1', unit: '°C', decimalPlaces: 1, periodDays: 10, size: '1x1' })
     setWidgetValidationError('')
     setEditingWidget(null)
     setShowWidgetForm(false)
@@ -2911,7 +2994,7 @@ function DashboardPage({ currentUser }) {
       metric: 'temperature_1',
       unit: '°C',
       decimalPlaces: 1,
-      periodHours: 24,
+      periodDays: 10,
       size: '1x1',
     })
     setShowWidgetForm(true)
@@ -2927,7 +3010,7 @@ function DashboardPage({ currentUser }) {
       metric: cfg.metric || 'value',
       unit: cfg.unit || '',
       decimalPlaces: cfg.decimal_places ?? 1,
-      periodHours: cfg.period_hours ?? 24,
+      periodDays: cfg.period_days ?? 10,
       size: cfg.size || getDefaultWidgetSize(widget.type),
     })
     setShowWidgetForm(true)
@@ -3031,7 +3114,7 @@ function DashboardPage({ currentUser }) {
         metric: widgetForm.metric.trim(),
         unit: widgetForm.unit.trim(),
         decimal_places: Number(widgetForm.decimalPlaces) || 0,
-        period_hours: Number(widgetForm.periodHours) || 24,
+        period_days: widgetForm.type === 'chart' ? (Number(widgetForm.periodDays) || 10) : 10,
         size: widgetForm.size || getDefaultWidgetSize(widgetForm.type),
       },
     }
@@ -3050,6 +3133,48 @@ function DashboardPage({ currentUser }) {
     try { await deleteWidget(widget.id); await loadDashboard(dashboard.id) }
     catch (err) { setError(err.message || 'Não foi possível excluir o widget.') }
     finally { setBusy(false) }
+  }
+
+  const handleChartPeriodChange = async (widget, periodDays) => {
+    const nextConfiguration = { ...(widget.configuration || {}), period_days: periodDays ?? null }
+    if (canManage) {
+      try {
+        await updateWidget(widget.id, {
+          dashboardId: dashboard.id,
+          name: widget.name,
+          type: widget.type,
+          position: widget.position,
+          dataSourceIds: widget.data_source_ids || [],
+          configuration: nextConfiguration,
+        })
+        await loadDashboard(dashboard.id)
+      } catch (err) { setError(err.message || 'Não foi possível alterar o período do gráfico.') }
+      return
+    }
+    setDashboard((current) => current ? ({
+      ...current,
+      widgets: current.widgets.map((item) => item.id === widget.id ? {
+        ...item,
+        configuration: nextConfiguration,
+        data: { ...item.data, periodDays, sources: item.data?.sources || [] },
+      } : item),
+    }) : current)
+    try {
+      const data = await fetchWidgetData(widget.id, { periodDays, page: 1, pageSize: 10 })
+      setDashboard((current) => current ? ({ ...current, widgets: current.widgets.map((item) => item.id === widget.id ? { ...item, data } : item) }) : current)
+    } catch (err) { setError(err.message || 'Não foi possível carregar o período selecionado.') }
+  }
+
+  const handleTablePageChange = async (widget, page, pageSize = 10) => {
+    if (!dashboard?.id) return
+    tablePagesRef.current[dashboard.id] = {
+      ...(tablePagesRef.current[dashboard.id] || {}),
+      [widget.id]: { page, pageSize },
+    }
+    try {
+      const data = await fetchWidgetData(widget.id, { page, pageSize })
+      setDashboard((current) => current ? ({ ...current, widgets: current.widgets.map((item) => item.id === widget.id ? { ...item, data } : item) }) : current)
+    } catch (err) { setError(err.message || 'Não foi possível carregar a página da tabela.') }
   }
 
   return (
@@ -3093,7 +3218,7 @@ function DashboardPage({ currentUser }) {
 
               <div className="dashboard-grid">
                 {(dashboard.widgets || []).map((widget) => (
-                  <DashboardWidget key={widget.id} widget={widget} onEdit={canManage ? openEditWidget : undefined} onDelete={canManage ? handleWidgetDelete : undefined} />
+                  <DashboardWidget key={widget.id} widget={widget} onEdit={canManage ? openEditWidget : undefined} onDelete={canManage ? handleWidgetDelete : undefined} onChartPeriodChange={handleChartPeriodChange} onTablePageChange={handleTablePageChange} />
                 ))}
                 {!dashboard.widgets?.length && <div className="empty-state"><p>Adicione um widget para começar.</p></div>}
               </div>
@@ -3124,7 +3249,7 @@ function DashboardPage({ currentUser }) {
             <div className="form-group"><label>Data Source</label><select value={widgetForm.dataSourceId} onChange={(e) => setWidgetForm({ ...widgetForm, dataSourceId: e.target.value })}><option value="">Selecione</option>{dataSources.map((source) => <option key={source.id} value={source.id}>{source.name}{source.topic ? ` — ${source.topic}` : ''}</option>)}</select></div>
             <div className="form-group"><label>Métrica</label><input value={widgetForm.metric} onChange={(e) => setWidgetForm({ ...widgetForm, metric: e.target.value })} placeholder="temperature_1" /></div>
             <div className="dashboard-form-row"><div className="form-group"><label>Unidade</label><input value={widgetForm.unit} onChange={(e) => setWidgetForm({ ...widgetForm, unit: e.target.value })} placeholder="°C" /></div><div className="form-group"><label>Casas decimais</label><input type="number" min="0" max="6" value={widgetForm.decimalPlaces} onChange={(e) => setWidgetForm({ ...widgetForm, decimalPlaces: e.target.value })} /></div></div><div className="form-group"><label>Tamanho</label><select value={widgetForm.size || getDefaultWidgetSize(widgetForm.type)} onChange={(e) => setWidgetForm({ ...widgetForm, size: e.target.value })}>{WIDGET_SIZE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><small className="form-help">O conteúdo permanece dentro do tamanho escolhido; tabelas usam rolagem interna.</small></div>
-            {widgetForm.type === 'chart' && <div className="form-group"><label>Período (horas)</label><input type="number" min="1" max="720" value={widgetForm.periodHours} onChange={(e) => setWidgetForm({ ...widgetForm, periodHours: e.target.value })} /></div>}
+
             <div className="dashboard-modal-actions"><button type="button" className="btn-small" onClick={resetWidgetForm}>Cancelar</button><button className="btn-test" disabled={busy}>Salvar</button></div>
           </form>
         </div>

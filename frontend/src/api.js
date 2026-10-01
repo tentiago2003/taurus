@@ -246,6 +246,12 @@ export function fetchDashboard(id) {
   return request(`/dashboards/${id}`)
 }
 
+export function fetchWidgetData(id, { periodDays, page = 1, pageSize = 10 } = {}) {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) })
+  if (periodDays !== undefined && periodDays !== null) params.set('periodDays', String(periodDays))
+  return request(`/widgets/${id}/data?${params.toString()}`)
+}
+
 export function createDashboard(data) {
   return request('/dashboards', {
     method: 'POST',

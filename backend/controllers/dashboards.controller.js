@@ -19,6 +19,17 @@ async function remove(req, res, params) {
   service.remove(Number(params.id), req.user);
   sendJson(res, 204, null);
 }
+async function getWidgetData(req, res, params) {
+  const url = new URL(req.url, 'http://localhost');
+  const periodDays = url.searchParams.get('periodDays');
+  const page = Number(url.searchParams.get('page') || 1);
+  const pageSize = Number(url.searchParams.get('pageSize') || 10);
+  sendJson(res, 200, service.getWidgetDataById(Number(params.id), req.user, {
+    periodDays: periodDays === null ? undefined : periodDays,
+    page,
+    pageSize,
+  }));
+}
 async function createWidget(req, res) {
   const body = await readJsonBody(req);
   sendJson(res, 201, service.createWidget(body, req.user?.id ?? null, req.user));
@@ -31,4 +42,4 @@ async function removeWidget(req, res, params) {
   service.removeWidget(Number(params.id), req.user);
   sendJson(res, 204, null);
 }
-module.exports = { list, get, create, update, remove, createWidget, updateWidget, removeWidget };
+module.exports = { list, get, getWidgetData, create, update, remove, createWidget, updateWidget, removeWidget };
